@@ -1,0 +1,34 @@
+# kdar_muminus_fullvolume.mac - 
+# mu- with energy spanning ** are spawned throughout the full detector volume
+#
+# Author: Cassandra Little
+
+#-----------------------------------------------
+#/control/macroPath /home/littleca/kdar/MichelAnalysis/mac/muminus_fullvolume.mac
+/rat/db/set DETECTOR experiment "jsns2"
+/rat/db/set DETECTOR geo_file "jsns2/jsns2.geo"
+/rat/db/set MC thin_factor 1.5
+
+/tracking/storeMuonDecayInfo true
+
+#-----------------------------------------------
+
+/run/initialize
+
+/process/activate Cerenkov
+
+# BEGIN EVENT LOOP
+/rat/proc jsnsdaq
+/rat/procset trigger_mode 1		#Analog sum
+/rat/proc count
+/rat/procset update 1
+/rat/proclast outroot			#Use IO.default_output_filename; Make output format ROOT
+
+# END EVENT LOOP 
+
+/generator/add combo gun:regexfill
+/generator/vtx/set mu- 0 0 0 0
+/generator/pos/set TargetVolume
+
+/run/beamOn 100
+
