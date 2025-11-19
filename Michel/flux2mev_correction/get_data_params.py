@@ -16,7 +16,7 @@ import time
 from collections import defaultdict
 import json
 
-OUTPUT_PATH = "/home/littleca/kdar/cleanerKDAR/Michel/flux2mev_correction/output_fluxCorr/"
+OUTPUT_PATH = "/home/littleca/kdar/Michel/flux2mev_correction/output_fluxCorr/"
 JSON_NAME="/home/littleca/kdar/correction_values.json"
 
 MICHEL_ENDPOINT_ENERGY = 53.3 # MeV
@@ -46,7 +46,7 @@ def fit_delta_t(h):
     return delta_t_fitf.Clone()
 
 def get_run_dates():
-    vals = list(csv.reader(open("/home/littleca/kdar/cleanerKDAR/Michel/flux2mev_correction/run_dates.txt")))
+    vals = list(csv.reader(open("/home/littleca/kdar/Michel/flux2mev_correction/run_dates.txt")))
     run_times = defaultdict(lambda : (None, None))
     for i, (run, start_date, start_time, end_date, end_time) in enumerate(vals):
         run = int(run)
@@ -220,7 +220,7 @@ if __name__ == "__main__":
 
         else :
             while True :
-                cont_prompt = raw_input("Version \"%s\" does not have a sum correction value, continue using the default flux to MeV of %i? [Y/n]" % (versionID, FLUX2MEV))
+                cont_prompt = input("Version \"%s\" does not have a sum correction value, continue using the default flux to MeV of %i? [Y/n]" % (versionID, FLUX2MEV))
                 valid = {"" : True, "Yes" : True, "Y" : True, "y" : True, "yes" : True, "No" : False, "N" : False, "n" : False, "no" : False}
                 if cont_prompt in valid.keys() :
                     if valid[cont_prompt] :
@@ -249,11 +249,11 @@ if __name__ == "__main__":
     # Grab the Data to analyze
     print("Opening %s" % (inputName))
     data_file = ROOT.TFile.Open(inputName, "READ")
-    energy_tree = data_file.event_tree
+    energy_tree = data_file["event_tree"]
     n_entries = energy_tree.GetEntries()
-    data = np.zeros(n_entries, dtype=[("x", np.float), ("y", np.float), ("z", np.float),
-                                      ("flux", np.float), ("nsat", np.int), ("delt", np.float), ("delvtx", np.float),
-                                      ('run', np.int), ("subrun", np.int), ('entry', np.int)])
+    data = np.zeros(n_entries, dtype=[("x", float), ("y", float), ("z", float),
+                                      ("flux", float), ("nsat", int), ("delt", float), ("delvtx", float),
+                                      ('run', int), ("subrun", int), ('entry', int)])
     flux_list = []
     for i in range(n_entries):
         energy_tree.GetEntry(i)
@@ -339,11 +339,11 @@ if __name__ == "__main__":
     fit_graph.SetLineColor(2)
     fit_graph.SetLineWidth(3)
 
-    scale = fit_vals[0]
+    scale = fit_vals[1]
     res = fit_vals[1]
     #scale_err = np.sqrt(fit_errors[0][0])
     #res_err = np.sqrt(fit_errors[1][1])
-    scale_err = fit_errors[0]
+    scale_err = fit_errors[1]
     res_err = fit_errors[1]
 
     # Write fit values to json file
@@ -358,21 +358,21 @@ if __name__ == "__main__":
         # Make output directory for that version ID
         newDir = OUTPUT_PATH+str(versionID)
         os.makedirs(newDir) 
-    	outFile = ROOT.TFile(newDir+"/fluxCorr_combined.root", "RECREATE")
+        outFile = ROOT.TFile(newDir+"/fluxCorr_combined.root", "RECREATE")
     elif (RUN_TYPE==1) :
         # Looking on per-run basis
         output_type = "run"
-        output_run = data[0]['run']
+        output_run = int(data[0]['run'])
         output_run_name = output_type+"_"+str(output_run)
         output_subrun = None
-    	outFile = ROOT.TFile(OUTPUT_PATH+str(versionID)+"/fluxCorr_"+str(output_run)+".root", "RECREATE")
+        outFile = ROOT.TFile(OUTPUT_PATH+str(versionID)+"/fluxCorr_"+str(output_run)+".root", "RECREATE")
     elif (RUN_TYPE==3) :
         # Looking on per-subrun basis
         output_type = "subrun"
-        output_run = data[0]['run']
+        output_run = int(data[0]['run'])
         output_run_name = output_type+"_"+str(output_run)
-        output_subrun = dat[0]['subrun']
-    	outFile = ROOT.TFile(OUTPUT_PATH+str(versionID)+"/fluxCorr_"+str(output_run)+"_"+str(output_subrun)+".root", "RECREATE")
+        output_subrun = int(dat[0]['subrun'])
+        outFile = ROOT.TFile(OUTPUT_PATH+str(versionID)+"/fluxCorr_"+str(output_run)+"_"+str(output_subrun)+".root", "RECREATE")
     
     out_vals = {output_run_name : {"Run" : output_run, "Subrun" : output_subrun, "StartingFlux2MeV": FLUX2MEV, "Flux2MeV" : conv, "Flux2MeVErr" : conv_err, "Flux2MeVScale" : scale, "Flux2MeVScaleErr" : scale_err}}
     version_update = {str(versionID) : out_vals}

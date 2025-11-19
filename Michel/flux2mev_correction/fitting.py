@@ -63,7 +63,7 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     try:
         window_size = np.abs(np.int(window_size))
         order = np.abs(np.int(order))
-    except ValueError, msg:
+    except (ValueError, msg):
         raise ValueError("window_size and order have to be of type int")
     if window_size % 2 != 1 or window_size < 1:
         raise TypeError("window_size size must be a positive odd number")
@@ -232,8 +232,8 @@ def Michel_S(x, par0, par1, par2, par3): # Sensitivity to p1 parameter
 
 class Muons:
     def __init__(self, nbins):
-        mum_vals = np.loadtxt("/home/marzece/KDAR_Analysis/MichelAnalysis/MC_mu_minus_FV_edep_vals.nptxt")
-        mup_vals = np.loadtxt("/home/marzece/KDAR_Analysis/MichelAnalysis/MC_mu_plus_FV_edep_vals.nptxt") 
+        mum_vals = np.loadtxt("/home/littleca/kdar/Michel/MC/MC_mu_minus_FV_edep_vals.nptxt")
+        mup_vals = np.loadtxt("/home/littleca/kdar/Michel/MC/MC_mu_plus_FV_edep_vals.nptxt") 
         hmuminus = ROOT.TH1D("", "", nbins, 0, 100)
         hmuplus = ROOT.TH1D("", "", nbins, 0, 100)
         for v in mup_vals:
@@ -245,8 +245,8 @@ class Muons:
         self.hcombined = ROOT.TH1D(hmuplus)
         self.hcombined.Add(hmuminus)
 
-        self.muplus_dist = np.array([hmuplus[i+1] for i in range(hmuplus.GetNbinsX())])
-        self.muminus_dist = np.array([hmuminus[i+1] for i in range(hmuminus.GetNbinsX())])
+        self.muplus_dist = np.array([hmuplus[i] for i in range(hmuplus.GetNbinsX())])
+        self.muminus_dist = np.array([hmuminus[i] for i in range(hmuminus.GetNbinsX())])
 
 def gaus(x, mu, sigma):
     """Returns the normalized gaussian value at "x" for gaussian with mean & width of mu and sigma."""
@@ -260,27 +260,49 @@ def get_resolution(E, sigma_ep=0.03, constant_term=0.0):
     efrac = E/MICHEL_E_ENDPOINT
     return np.sqrt(sigma_ep**2/efrac + constant_term**2)
 
-def apply_smearing(edep_spectrum, evals, a, c):
+def apply_smearing(edep_spectrum, evals, xaxis, a, c):
     sigmas = [get_resolution(x, a, c)*x for x in evals]
+    print("sigmas:")
+    print(sigmas)
     bin_width = np.diff(evals)[0]
-    smears = np.array([gaus(evals, x, s) for x,s in zip(evals, sigmas)])
+    smears = np.array([gaus(xaxis, x, s) for x,s in zip(evals, sigmas)])
+    print("Gaus smears:")
+    print(smears)
     ret = np.sum([scale*smear*bin_width for scale, smear in zip(edep_spectrum, smears)],axis=0)
+    print("dist:")
+    print(ret)
     return ret
 
 def edep_fit(args, data_dist, set_hist, muons_info) :
     scale = args[0]
-    shift = args[1]
+    escale = args[1]
     smear1 = args[2]
     smear2 = args[3]
     mixing_frac = args[4]
     bckg = args[5]
-    print(scale, shift,smear1, smear2, mixing_frac, bckg)
-    bin_centers = (np.linspace(0, 100, set_hist["n_bins"]+1))[:-1] #+ 100/(set_hist["n_bins"]*2.0))[:-1]
-    xaxis = bin_centers/shift
-    mc_pred = muons_info.muplus_dist*mixing_frac + muons_info.muminus_dist*(1-mixing_frac) + np.ones(len(muons_info.muminus_dist))*bckg
-    smeared_dist = apply_smearing(mc_pred, bin_centers, smear1, smear2)
-    mask = np.logical_and(xaxis >= 20.0/shift, xaxis < 60.0/shift)
-    smeared_dist = smeared_dist[mask]*scale
+    print(scale, escale,smear1, smear2, mixing_frac, bckg)
+
+    data_xaxis = np.linspace(set_hist["min"], set_hist["max"], set_hist["n_bins"])
+    data_bin_width = np.diff(data_xaxis)[0]
+    data_max_bin = np.digitize(np.array([max(data_dist)]), data_xaxis)[0]
+    mc_xaxis = np.linspace(0, (set_hist["nbins"]*data_bin_width), set_hist["nbins"])	# Attempting to have it so that we have the same number of bins at the same scale but starting form zero.. IDK if good
+
+    
+
+    bin_centers = (np.linspace(0, 100, set_hist["n_bins"]+1))[1:-1]# + 100/(set_hist["n_bins"]*2.0))[:-1]
+    xaxis = np.array([i*escale for i in bin_centers])
+    print("bin centers")
+    print(len(bin_centers), bin_centers)
+    print("xaxis")
+    print(len(xaxis), xaxis)
+
+    mc_pred = muons_info.muplus_dist*mixing_frac + muons_info.muminus_dist*(1-mixing_frac)
+    mc_pred = (mc_pred*scale) + bckg
+
+    smeared_dist = apply_smearing(mc_pred, bin_centers, xaxis, smear1, smear2)
+    #print(len(smeared_dist), smeared_dist)
+    mask = np.logical_and(xaxis >= 20.0, xaxis < 60.0)
+    smeared_dist = smeared_dist[mask]#*scale
 
     chi2 = abs(np.sum((smeared_dist - data_dist)**2/smeared_dist))
     print("chi2 = ", chi2)
@@ -295,22 +317,14 @@ def do_edep_fit(data_vals, set_hist):
     for E in data_vals:
         #if (E > 20) :
         hdata.Fill(E)
-    data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX()) if hdata.GetBinLowEdge(i+1) >= 20.0 and hdata.GetBinCenter(i+1) < 60])    
-    #data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX())])
-
-    bin_centers = (np.linspace(0, 100, nbins+1))[:-1] #+ 100/(2.0*nbins))[:-1]
-    bin_width = np.diff(bin_centers)[0]
-    for center in bin_centers:
-        if center-bin_width <= MICHEL_E_ENDPOINT <= center+bin_width:
-            endpoint_bin_center = center
-    shift_diff = endpoint_bin_center / hdata.GetBinCenter(hdata.GetMaximumBin())
-   
-    print(shift_diff)
+    #data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX()) if hdata.GetBinLowEdge(i+1) >= 20.0 and hdata.GetBinCenter(i+1) < 60])    
+    data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX())])
  
     my_muons = Muons(nbins)
     #relative_scale = hdata.Integral()/my_muons.hcombined.Integral()
     relative_scale = MICHEL_E_ENDPOINT/(hdata.GetBinCenter(hdata.GetMaximumBin()))
-    bf = optimize.minimize(edep_fit, [relative_scale, shift_diff, 0.006, 0.03, 0.5, 15], method = "Powell", bounds=[(0.1*relative_scale, 10*relative_scale), (0.001, None), (0, None), (0, None), (0, 1.0), (0, 100)],  args=(data_dist, set_hist, my_muons))
+    #bf = optimize.minimize(edep_fit, [80e3, 1, 0.03, 0.03, 0.5, 1.0], bounds=[(0.0, 50e6), (0.1, 2), (0.001, 1.0), (0.001, 1.0), (0.001, 1.0), (0.0, 5000.0)],  args=(data_dist, set_hist, my_muons))
+    bf = optimize.minimize(edep_fit, [80e3, 1, 0.03, 0.03, 0.5, 1.0, 0.04, 0.04], bounds=[(0.0, 50e6), (0.1, 2), (0.001, 1.0), (0.001, 1.0), (0.001, 1.0), (0.0, 5000.0), (0.0, 1.0), (0.0, 1.0)],  args=(data_dist, set_hist, my_muons))
     print(bf)
     #print(bf.hess_inv)
     #bf_err = np.sqrt(np.diag(bf.hess_inv.todense()))
@@ -322,11 +336,14 @@ def do_edep_fit(data_vals, set_hist):
     #bf.x = np.array(my_bf)
 
     gbf = ROOT.TGraph()
-    mc_pred = my_muons.muplus_dist*bf.x[4] + my_muons.muminus_dist*(1-bf.x[4])
 
-    test = apply_smearing(mc_pred, bin_centers, bf.x[2], bf.x[3])*bf.x[0]
-    xaxis = bin_centers+bf.x[1]*0
-    mask = np.logical_and(xaxis > 20, xaxis < 60)
+    bin_centers = (np.linspace(0, 100, nbins+1))[1:-1]# + 100/(2.0*nbins))[:-1]
+    mc_pred = my_muons.muplus_dist*bf.x[4] + my_muons.muminus_dist*(1-bf.x[4])
+    mc_pred = (mc_pred*bf.x[1]) + bf.x[5]
+
+    xaxis = np.array([i*bf.x[1] for i in bin_centers])
+    test = apply_smearing(mc_pred, bin_centers, xaxis, bf.x[2], bf.x[3])#*bf.x[0]
+    mask = np.logical_and(xaxis >= 20.0*bf.x[1], xaxis < 60.0*bf.x[1])
     test = test[mask]
     xaxis = xaxis[mask]
     for i, (x,v) in enumerate(zip(xaxis, test)):
