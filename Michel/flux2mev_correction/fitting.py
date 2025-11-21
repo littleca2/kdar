@@ -245,8 +245,8 @@ class Muons:
         self.hcombined = ROOT.TH1D(hmuplus)
         self.hcombined.Add(hmuminus)
 
-        self.muplus_dist = np.array([hmuplus[i] for i in range(hmuplus.GetNbinsX())])
-        self.muminus_dist = np.array([hmuminus[i] for i in range(hmuminus.GetNbinsX())])
+        self.muplus_dist = np.array([hmuplus[i+1] for i in range(hmuplus.GetNbinsX()) if hmuplus.GetBinLowEdge(i+1) >= 20.0 and hmuplus.GetBinCenter(i+1) < 60])
+        self.muminus_dist = np.array([hmuminus[i+1] for i in range(hmuminus.GetNbinsX())if hmuminus.GetBinLowEdge(i+1) >= 20.0 and hmuminus.GetBinCenter(i+1) < 60])
 
 def gaus(x, mu, sigma):
     """Returns the normalized gaussian value at "x" for gaussian with mean & width of mu and sigma."""
@@ -260,94 +260,104 @@ def get_resolution(E, sigma_ep=0.03, constant_term=0.0):
     efrac = E/MICHEL_E_ENDPOINT
     return np.sqrt(sigma_ep**2/efrac + constant_term**2)
 
-def apply_smearing(edep_spectrum, evals, xaxis, a, c):
+def apply_smearing(edep_spectrum, evals, a, c):
     sigmas = [get_resolution(x, a, c)*x for x in evals]
-    print("sigmas:")
-    print(sigmas)
-    bin_width = np.diff(evals)[0]
-    smears = np.array([gaus(xaxis, x, s) for x,s in zip(evals, sigmas)])
-    print("Gaus smears:")
-    print(smears)
+    #bin_width = np.diff(evals)[0]
+    bin_width = 1
+    smears = np.array([gaus(evals, x, s) for x,s in zip(evals, sigmas)])
     ret = np.sum([scale*smear*bin_width for scale, smear in zip(edep_spectrum, smears)],axis=0)
-    print("dist:")
-    print(ret)
     return ret
 
-def edep_fit(args, data_dist, set_hist, muons_info) :
+def edep_fit(args, data_bin_centers, binned_data, set_hist, muons_info) :
     scale = args[0]
-    escale = args[1]
+    escale = math.exp(args[1])
     smear1 = args[2]
     smear2 = args[3]
     mixing_frac = args[4]
     bckg = args[5]
-    print(scale, escale,smear1, smear2, mixing_frac, bckg)
+    #print(scale, escale,smear1, smear2, mixing_frac, bckg)
 
-    data_xaxis = np.linspace(set_hist["min"], set_hist["max"], set_hist["n_bins"])
-    data_bin_width = np.diff(data_xaxis)[0]
-    data_max_bin = np.digitize(np.array([max(data_dist)]), data_xaxis)[0]
-    mc_xaxis = np.linspace(0, (set_hist["nbins"]*data_bin_width), set_hist["nbins"])	# Attempting to have it so that we have the same number of bins at the same scale but starting form zero.. IDK if good
-
-    
-
-    bin_centers = (np.linspace(0, 100, set_hist["n_bins"]+1))[1:-1]# + 100/(set_hist["n_bins"]*2.0))[:-1]
-    xaxis = np.array([i*escale for i in bin_centers])
-    print("bin centers")
-    print(len(bin_centers), bin_centers)
-    print("xaxis")
-    print(len(xaxis), xaxis)
-
+    mc_bin_centers = (np.linspace(20, 60, 100) + 0.5)[:-1]
     mc_pred = muons_info.muplus_dist*mixing_frac + muons_info.muminus_dist*(1-mixing_frac)
     mc_pred = (mc_pred*scale) + bckg
 
-    smeared_dist = apply_smearing(mc_pred, bin_centers, xaxis, smear1, smear2)
-    #print(len(smeared_dist), smeared_dist)
-    mask = np.logical_and(xaxis >= 20.0, xaxis < 60.0)
-    smeared_dist = smeared_dist[mask]#*scale
+    smeared_dist = apply_smearing(mc_pred, mc_bin_centers, smear1, smear2)
 
-    chi2 = abs(np.sum((smeared_dist - data_dist)**2/smeared_dist))
-    print("chi2 = ", chi2)
+    # Convert the MC prediction to flux and interpolate to re-create the flux data distribution
+    conv_bin_centers = (mc_bin_centers*escale)
+    conv_data = np.interp(data_bin_centers, conv_bin_centers, smeared_dist)
+
+    chi2 = abs(np.sum((conv_data - binned_data)**2/conv_data))
+    #print("chi2 = ", chi2)
     return chi2
 
 def do_edep_fit(data_vals, set_hist):
-    nbins = set_hist["n_bins"]
-    hist_offset = float(set_hist["max"]-set_hist["min"])/100.0
 
-    hdata = ROOT.TH1D("", "", nbins, 0, 100)
-
-    for E in data_vals:
-        #if (E > 20) :
-        hdata.Fill(E)
-    #data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX()) if hdata.GetBinLowEdge(i+1) >= 20.0 and hdata.GetBinCenter(i+1) < 60])    
-    data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX())])
+    #data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX())])
+    data_dist = data_vals
+    # Re-bin the flux data
+    data_bin_width = float(set_hist["max"] - set_hist["min"]) / float(set_hist["n_bins"])
+    data_bin_centers = np.linspace( (set_hist["min"] + float(data_bin_width)/2), (set_hist["max"] - (float(data_bin_width)/2)), set_hist["n_bins"])
+    data_bins = np.linspace(set_hist["min"], set_hist["max"], set_hist["n_bins"]+1)
+    data_bin_idx = np.digitize(data_dist, data_bins)
+    binned_data = np.zeros(len(data_bins)-1)
+    for i, bin_id in enumerate(data_bin_idx):
+        # Ignore overflow bin data
+        if bin_id == len(data_bins):
+            continue
+        #binned_data[bin_id-1] += data_dist[i]	# Raw data
+        binned_data[bin_id-1] += 1		# Histogram
  
-    my_muons = Muons(nbins)
-    #relative_scale = hdata.Integral()/my_muons.hcombined.Integral()
-    relative_scale = MICHEL_E_ENDPOINT/(hdata.GetBinCenter(hdata.GetMaximumBin()))
-    #bf = optimize.minimize(edep_fit, [80e3, 1, 0.03, 0.03, 0.5, 1.0], bounds=[(0.0, 50e6), (0.1, 2), (0.001, 1.0), (0.001, 1.0), (0.001, 1.0), (0.0, 5000.0)],  args=(data_dist, set_hist, my_muons))
-    bf = optimize.minimize(edep_fit, [80e3, 1, 0.03, 0.03, 0.5, 1.0, 0.04, 0.04], bounds=[(0.0, 50e6), (0.1, 2), (0.001, 1.0), (0.001, 1.0), (0.001, 1.0), (0.0, 5000.0), (0.0, 1.0), (0.0, 1.0)],  args=(data_dist, set_hist, my_muons))
+    my_muons = Muons(100)	# The binned histograms are not used so n_bin doesn't matter
+
+    meth_n = np.array([None, 'L-BFGS-B', 'Nelder-Mead', 'SLSQP', 'Powell', 'COBYLA'])#, 'TNC', 'BFGS'])
+    chi_list = []
+    suc_list = []
+    for i, name in enumerate(meth_n) :
+        print(name)
+        #bf_test = optimize.minimize(edep_fit, [1, 960, 0.03, 0.03, 0.5, 0.0], bounds=[(0, None), (0, 1e4), (0.001, 1.0), (0.001, 1.0), (0.001, 1.0), (0.0, None)], method=name, args=(data_bin_centers, binned_data, set_hist, my_muons))
+        bf_test = optimize.basinhopping(edep_fit, [1, np.log(960), 0.05, 0.05, 0.5, 10], stepsize=0.001, minimizer_kwargs={'bounds':[(0, None), (0, np.log(1e5)), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, None)], 'method':name, 'args':(data_bin_centers, binned_data, set_hist, my_muons)})
+        chi_list.append(bf_test.fun)
+        suc_list.append(bf_test.success)
+        if bf_test.fun < chi_list[i-1] and i > 0 and bf_test.success:
+            bf = bf_test
+    print([(name, chi, suc) for name, chi, suc in sorted(zip(meth_n, chi_list, suc_list), key=lambda x : x[1])])
     print(bf)
     #print(bf.hess_inv)
     #bf_err = np.sqrt(np.diag(bf.hess_inv.todense()))
     #bf_err = np.sqrt(np.diag(np.linalg.inv(bf.hess)))
     #print(bf_err)
-    bf_err = [0,0]    
+    bf_err = [[0,0],[0,0]]    
 
     #my_bf = [21.9708, -0.652794, 0.026418, 0.0, 0.378431, 0]
     #bf.x = np.array(my_bf)
 
+    bf_escale = math.exp(bf.x[1])
+
     gbf = ROOT.TGraph()
 
-    bin_centers = (np.linspace(0, 100, nbins+1))[1:-1]# + 100/(2.0*nbins))[:-1]
+    mc_bin_centers = (np.linspace(20, 60, 100) + 0.5)[:-1]
     mc_pred = my_muons.muplus_dist*bf.x[4] + my_muons.muminus_dist*(1-bf.x[4])
-    mc_pred = (mc_pred*bf.x[1]) + bf.x[5]
+    mc_pred = (mc_pred*bf.x[0]) + bf.x[5]
 
-    xaxis = np.array([i*bf.x[1] for i in bin_centers])
-    test = apply_smearing(mc_pred, bin_centers, xaxis, bf.x[2], bf.x[3])#*bf.x[0]
-    mask = np.logical_and(xaxis >= 20.0*bf.x[1], xaxis < 60.0*bf.x[1])
-    test = test[mask]
-    xaxis = xaxis[mask]
-    for i, (x,v) in enumerate(zip(xaxis, test)):
-        gbf.SetPoint(i, x, v*hist_offset)
+    test = apply_smearing(mc_pred, mc_bin_centers, bf.x[2], bf.x[3])
+    conv_bin_centers = (mc_bin_centers * bf_escale)
+    conv_data = np.interp(data_bin_centers, conv_bin_centers, test)
+
+    print("MC X centers * escale")
+    print(conv_bin_centers)
+    print("MC Y values")
+    print(test)
+    print("Flux data X centers")
+    print(data_bin_centers)
+    print("Interpolated flux data from MC")
+    print(conv_data)
+#    hist_offset = float(set_hist["max"]-set_hist["min"])/100.0
+    #mask = np.logical_and(xaxis >= 20.0, xaxis < 60.0)
+    #test = test[mask]
+    #xaxis = xaxis[mask]
+    for i, (x,v) in enumerate(zip(data_bin_centers, conv_data)):
+        gbf.SetPoint(i, x, v)
 
     return bf.x, bf_err, gbf 
 
