@@ -178,9 +178,8 @@ if __name__ == "__main__":
     RUN_TYPE = args.runType
     versionID = args.version
 
-    bin_div = 0.01	#TODO remove
-    hist_max = 70
-    hist_min = 0
+    fid_max = 70
+    fid_min = 0
     NBINS_R = 7
     NBINS_Z = 15
     Z_MIN = -1.5e3
@@ -284,30 +283,29 @@ if __name__ == "__main__":
         if z < FV_Z_MAX and z > FV_Z_MIN and R < FV_R_MAX:
             flux_list.append(energy_tree.flux)
 
+    flux_list = np.array(flux_list)
+    flux_list_slice = np.array([i for i in flux_list if i < flux_max and i > flux_min])
+
     # Compute the number of bins
-    n_bins = int(1/bin_div)
+    n_bins_flux = len(np.histogram_bin_edges(flux_list_slice, bins='sqrt')) - 1
 
-    set_hist = {"n_bins" : n_bins, "min" : hist_min, "max" : hist_max}
+    set_hist = {"n_bins" : n_bins_flux, "min" : flux_min, "max" : flux_max}
 
-    fid_hist = ROOT.TH1D("fid_hist", "fid_hist", n_bins, hist_min, hist_max)
-    flux_hist = ROOT.TH1D("flux_hist", "Michel Flux;Flux;Counts", n_bins, flux_min, flux_max)
+    flux_hist = ROOT.TH1D("flux_hist", "Michel Flux;Flux;Counts", n_bins_flux, flux_min, flux_max)
 
     for flux in flux_list:
         flux_hist.Fill(flux)
 
-    E_vals, N_vals, err = fit.GetData(flux_hist)
-    guess = [0.04, flux_hist.GetMaximum(), MICHEL_ENDPOINT_ENERGY*FLUX2MEV]
-    flux_fit_vals, flux_errors = curve_fit(fit.Michel_Conv, E_vals, N_vals, p0=guess, maxfev=5000, sigma=err)
-    conv = flux_fit_vals[2]/MICHEL_ENDPOINT_ENERGY
-    conv_err = np.sqrt(flux_errors[2][2])/MICHEL_ENDPOINT_ENERGY
+    flux_fit_vals, flux_errors, flux_fit_graph = fit.do_edep_fit(flux_list, set_hist)
+
+    conv = flux_fit_vals[1]
+    conv_err = np.sqrt(flux_errors[1][1])
+    res = flux_fit_vals[2]
+    res_err = np.sqrt(flux_errors[2][2])
+
     print("File = %s, Conversion = %f +- %f" % (inputName, conv, conv_err))
-    flux_fit_graph = ROOT.TGraph()
     flux_fit_graph.SetLineColor(2)
     flux_fit_graph.SetLineWidth(2)
-    xax = np.linspace(0, flux_hist.GetBinCenter(flux_hist.GetNbinsX()), 1000)
-    yvals = fit.Michel_Conv(xax, *flux_fit_vals)
-    for i, (x, y) in enumerate(zip(xax,yvals)):
-        flux_fit_graph.SetPoint(i, x, y)
 
     fid_list = []
     for i in range(n_entries):
@@ -330,24 +328,20 @@ if __name__ == "__main__":
         if E<MICHEL_EMAX_CUT and E > MICHEL_EMIN_CUT and z < FV_Z_MAX and z > FV_Z_MIN and R < FV_R_MAX:
             time_flux_hist.Fill(energy_tree.run, energy_tree.flux)
             delt_hist.Fill(energy_tree.delt)
-            fid_hist.Fill(E)
             fid_list.append(E)
+     
+    fid_list = np.array(fid_list)
+    fid_list_slice = np.array([i for i in fid_list if i < fid_max and i > fid_min])
+    
+    # Compute the number of bins
+    n_bins_fid = len(np.histogram_bin_edges(fid_list_slice, bins='sqrt')) - 1
+    
+    fid_hist = ROOT.TH1D("fid_hist", "fid_hist", n_bins_fid, fid_min, fid_max)
 
-    fid_arr = np.array(fid_list)
-    #fit_vals, fit_errors, fit_graph = fit.do_michel_fit(fid_hist, full_errors=True)
-    fit_vals, fit_errors, fit_graph = fit.do_edep_fit(fid_arr, set_hist)
-    fit_graph.SetLineColor(2)
-    fit_graph.SetLineWidth(3)
-
-    scale = fit_vals[1]
-    res = fit_vals[1]
-    #scale_err = np.sqrt(fit_errors[0][0])
-    #res_err = np.sqrt(fit_errors[1][1])
-    scale_err = fit_errors[1]
-    res_err = fit_errors[1]
+    for E in fid_list:
+        fid_hist.Fill(E)
 
     # Write fit values to json file
-    # TODO: make it so that you can edit already made entries (has an ID)
     output_run=0
     if (RUN_TYPE==0) :
         # Looking at a combined number of runs
@@ -374,7 +368,7 @@ if __name__ == "__main__":
         output_subrun = int(dat[0]['subrun'])
         outFile = ROOT.TFile(OUTPUT_PATH+str(versionID)+"/fluxCorr_"+str(output_run)+"_"+str(output_subrun)+".root", "RECREATE")
     
-    out_vals = {output_run_name : {"Run" : output_run, "Subrun" : output_subrun, "StartingFlux2MeV": FLUX2MEV, "Flux2MeV" : conv, "Flux2MeVErr" : conv_err, "Flux2MeVScale" : scale, "Flux2MeVScaleErr" : scale_err}}
+    out_vals = {output_run_name : {"Run" : output_run, "Subrun" : output_subrun, "StartingFlux2MeV": FLUX2MEV, "Flux2MeV" : conv, "Flux2MeVErr" : conv_err, "Flux2MeVScale" : None, "Flux2MeVScaleErr" : None}}
     version_update = {str(versionID) : out_vals}
 
     if (os.path.isfile(JSON_NAME)) :
@@ -393,34 +387,36 @@ if __name__ == "__main__":
 
     outFile.cd()
     c0 = ROOT.TCanvas("MC Conv")
-    flux_hist.Draw("HISTE")
-    latex = ROOT.TLatex()
-    latex.DrawLatex(20e3, 500, "Flux/MeV: %0.3f #pm %0.3f" % (conv, conv_err))
+    flux_hist.GetXaxis().SetTitle("Flux")
+    flux_hist.GetYaxis().SetTitle("Counts")
+    flux_hist.GetYaxis().SetRangeUser(0, 1.2*flux_hist.GetMaximum())
+    flux_hist.SetTitle("")
     flux_hist.SetStats(0)
-    flux_hist.SetLineColor(1)
-    flux_fit_graph.Draw("sameline")
+    flux_hist.SetLineColor(ROOT.kBlack)
+    flux_hist.SetLineWidth(2)
+    flux_fit_graph.Draw("al")
+    flux_hist.Draw("SAMEE")
+    latex = ROOT.TLatex()
+    latex.DrawLatex(1000, 0.8*flux_hist.GetMaximum(), "Flux/MeV: %0.3f #pm %0.3f" % (conv, conv_err))
     c0.Write()
 
     C = ROOT.TCanvas("MC Parameters")
     fid_hist.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
     fid_hist.GetYaxis().SetTitle("Counts/%0.1fMeV" % fid_hist.GetBinWidth(1))
-    fid_hist.GetYaxis().SetRangeUser(0, 1.2*fid_hist.GetMaximum())
+    fid_hist.GetYaxis().SetRangeUser(0, 1.5*fid_hist.GetMaximum())
     fid_hist.SetTitle("")
     fid_hist.SetStats(0)
     fid_hist.SetLineColor(ROOT.kBlack)
     fid_hist.SetLineWidth(2)
-    fit_graph.Draw("al")
     fid_hist.Draw("SAMEE")
 
     leg = ROOT.TLegend(0.7, 0.7, 0.9, 0.9)
     leg.AddEntry(fid_hist, "Sym Fid: ( #mu^{+} + #mu^{-} )")
-    leg.AddEntry(fit_graph, "Michel Fit")
    # leg.Draw("Same")
 
     latex = ROOT.TLatex()
-    latex.DrawLatex(5, 0.9*fid_hist.GetMaximum(), "Scale = %0.4f #pm %0.4f" % (scale, scale_err))
+    latex.DrawLatex(5, 0.9*fid_hist.GetMaximum(), "Flux/MeV = %0.4f #pm %0.4f" % (conv, conv_err))
     latex.DrawLatex(5, 0.8*fid_hist.GetMaximum(), "R_{ep} = %0.4f%% #pm %0.4f" % (res*100, res_err*100))
-    latex.DrawLatex(5, 0.8*fid_hist.GetMaximum(), "R_{ep} = %0.4f%%" % (res*100))
     C.Write()
 
     c2 = ROOT.TCanvas("MC Spatial")
@@ -451,6 +447,7 @@ if __name__ == "__main__":
     delt_hist.Draw()
     c3.Write()
 
+    outFile.Close()
 
 #    c4 = ROOT.TCanvas()
 #    c4.SetRightMargin(0.0)
@@ -465,23 +462,23 @@ if __name__ == "__main__":
 #    c6 = ROOT.TCanvas()
 #    location_flux_hist.DrawFit(c5, c6)
 
-    c9 = ROOT.TCanvas("TimeFluxHist")
-    time_flux_hist.DoFit()
-    time_flux_hist.Draw()
-    c9.Write()
+    #c9 = ROOT.TCanvas("TimeFluxHist")
+    #time_flux_hist.DoFit()
+    #time_flux_hist.Draw()
+    #c9.Write()
 
     # Create Multisim parameter sets for Systematics
     # Decompose the cov matrix for sampling
-    cky = cholesky(fit_errors, lower=True)
-    mc_smear_param_tree = ROOT.TNtuple("data_param_tree", "data_param_tree", "scale:res:ampl")
-    gaus = np.random.normal(loc=0, scale=1, size=(MULTISIM_NTRIALS, 3))
-    for random_vec in gaus:
+    #cky = cholesky(fit_errors, lower=True)
+    #mc_smear_param_tree = ROOT.TNtuple("data_param_tree", "data_param_tree", "scale:res:ampl")
+    #gaus = np.random.normal(loc=0, scale=1, size=(MULTISIM_NTRIALS, 3))
+    #for random_vec in gaus:
         # TODO there's probably a more numpy way of calculating this
-        p = fit_vals + np.dot(cky, random_vec)
-        mc_smear_param_tree.Fill(p[0], p[1], p[2])
-    outFile.cd()
-    mc_smear_param_tree.Write()
-    outFile.Close()
+    #    p = fit_vals + np.dot(cky, random_vec)
+    #    mc_smear_param_tree.Fill(p[0], p[1], p[2])
+    #outFile.cd()
+    #mc_smear_param_tree.Write()
+    #outFile.Close()
 #    c10 = ROOT.TCanvas()
 #    location_deltat_hist.Draw(c10)
 

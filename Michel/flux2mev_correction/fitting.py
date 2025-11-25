@@ -300,7 +300,6 @@ def edep_fit(args, data_bin_centers, binned_data, set_hist, muons_info) :
 def do_edep_fit(data_vals, set_hist):
 
 
-    #data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX())])
     data_dist = data_vals
     # Re-bin the flux data
     data_bin_width = float(set_hist["max"] - set_hist["min"]) / float(set_hist["n_bins"])
@@ -316,88 +315,20 @@ def do_edep_fit(data_vals, set_hist):
         binned_data[bin_id-1] += 1		# Histogram
  
     my_muons = Muons(200)
-    #import pdb; pdb.set_trace()
 
     popt, pcov = optimize.curve_fit(get_mc_edep_prediction(data_bin_centers, binned_data, my_muons), data_bin_centers, binned_data, p0=[0.16, 945, 0.01], bounds=((0.0, 0.0, 0.0),(np.inf, 1e5, 1.0)))
-    #bf = optimize.minimize(edep_fit, [0.16, 945, 0.01, 0.01, 0.5, 10], bounds=[(0.0, None), (0.0, 1e5), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, None)], args=(data_bin_centers, binned_data, set_hist, my_muons))
-    #meth_n = np.array([None, 'L-BFGS-B', 'Nelder-Mead', 'SLSQP', 'Powell', 'COBYLA'])#, 'TNC', 'BFGS'])
-    #chi_list = []
-    #suc_list = []
-    #for i, name in enumerate(meth_n) :
-    #    print(name)
-    #    bf_test = optimize.minimize(edep_fit, [0.16, np.log(945), 0.01, 0.01, 0.5, 10], bounds=[(0.0, None), (0.0, np.log(1e5)), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, None)], method=name, args=(data_bin_centers, binned_data, set_hist, my_muons))
-        #bf_test = optimize.basinhopping(edep_fit, [0.16, np.log(945), 0.01, 0.01, 0.5, 10], stepsize=0.001, minimizer_kwargs={'bounds':[(0.0, None), (0, np.log(1e5)), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, None)], 'method':name, 'args':(data_bin_centers, binned_data, set_hist, my_muons)})
-    #    chi_list.append(bf_test.fun)
-    #    suc_list.append(bf_test.success)
-    #    print(bf_test)
-    #    if bf_test.fun < chi_list[i-1] and i > 0 and bf_test.success and bf_test.x.all()>=0:
-    #        bf = bf_test
-    #print([(name, chi, suc) for name, chi, suc in sorted(zip(meth_n, chi_list, suc_list), key=lambda x : x[1])])
-    #print(bf)
-    #print(bf.hess_inv)
-    #bf_err = np.sqrt(np.diag(bf.hess_inv.todense()))
-    #bf_err = bf.hess_inv.todense()
-    #bf_err = np.sqrt(np.diag(np.linalg.inv(bf.hess)))
-    #print(bf_err)
-    #bf_err = [[0,0],[0,0]]    
 
-    #my_bf = [21.9708, -0.652794, 0.026418, 0.0, 0.378431, 0]
-    #bf.x = np.array(my_bf)
-
-    #bf_scale = bf.x[0]
-    #bf_escale = bf.x[1]
-    #bf_smear1 = bf.x[2]
-    #bf_smear2 = bf.x[3]
-    #bf_mixing_frac = bf.x[4]
-    #bf_bckg = bf.x[5]
-
-    bf_err = pcov
-
-    bf_scale = popt[0]
-    bf_escale = popt[1]
-    bf_smear1 = popt[2]
-    bf_smear2 = 0
-    bf_mixing_frac = 0.5
-    bf_bckg = binned_data[-1]
+    # Apply the fitted values to the function so we can graph it
+    test_popt = np.insert(popt, 0, 0)
+    closure_func = get_mc_edep_prediction(data_bin_centers, binned_data, my_muons)
+    test = closure_func(*test_popt)
 
     gbf = ROOT.TGraph()
 
-    mc_bin_centers = (np.linspace(0, 100, 200) + 0.5)[:-1]
-    mc_pred = my_muons.muplus_dist*bf_mixing_frac + my_muons.muminus_dist*(1-bf_mixing_frac)
-    mc_pred = (mc_pred*bf_scale) + bf_bckg
-
-    test = apply_smearing(mc_pred, mc_bin_centers, bf_smear1, bf_smear2)
-    conv_bin_centers = (mc_bin_centers * bf_escale)
-    conv_data = np.interp(data_bin_centers, conv_bin_centers, test)
-
-    print("MC bin centers (unscaled)")
-    print(mc_bin_centers)
-    print("MC pred (unscaled)")
-    print(mc_pred)
-
-    print("MC X centers * escale")
-    print(conv_bin_centers)
-    print("MC Y values")
-    print(test)
-    print("Flux data X centers")
-    print(data_bin_centers)
-    print("Interpolated flux data from MC")
-    print(conv_data)
-
-    print("Max Test X, Y")
-    print(conv_bin_centers[np.argmax(test)], max(test))
-
-    testg = ROOT.TGraph()
-    for i, (x,y) in enumerate(zip(conv_bin_centers, test)):
-        testg.SetPoint(i, x, y)
-#    hist_offset = float(set_hist["max"]-set_hist["min"])/100.0
-    #mask = np.logical_and(xaxis >= 20.0, xaxis < 60.0)
-    #test = test[mask]
-    #xaxis = xaxis[mask]
-    for i, (x,v) in enumerate(zip(data_bin_centers, conv_data)):
+    for i, (x,v) in enumerate(zip(data_bin_centers, test)):
         gbf.SetPoint(i, x, v)
 
-    return popt, bf_err, gbf, testg 
+    return popt, pcov, gbf
 
 def do_michel_fit(hist, full_errors=False):
     # Fit the given histogram with a Michel energy spectrum for the energy scale
