@@ -284,18 +284,29 @@ if __name__ == "__main__":
         if z < FV_Z_MAX and z > FV_Z_MIN and R < FV_R_MAX:
             flux_list.append(energy_tree.flux)
 
+    flux_list = np.array(flux_list)
+
     # Compute the number of bins
-    n_bins = int(1/bin_div)
+    flux_list_slice = np.array([i for i in flux_list if i < flux_max and i > flux_min])
+    n_bins_sturges = np.ceil(np.log2(len(flux_list_slice)) + 1)	# Sturges' formula
+    q75, q25 = np.percentile(flux_list_slice, [75, 25])
+    iqr = q75 - q25
+    h = 2 * iqr / (len(flux_list_slice) ** (1/3))			# FD rule bin width
+    range_fd = np.max(flux_list_slice) - np.min(flux_list_slice)
+    n_bins_fd = np.ceil(range_fd / h)
+
+    n_bins_sns = len(np.histogram_bin_edges(flux_list_slice, bins='sqrt')) - 1
+    n_bins = int(n_bins_sns)
+    #n_bins = int(1/bin_div)
 
     set_hist = {"n_bins" : n_bins, "min" : flux_min, "max" : flux_max}
 
-    fid_hist = ROOT.TH1D("fid_hist", "fid_hist", n_bins, hist_min, hist_max)
     flux_hist = ROOT.TH1D("flux_hist", "Michel Flux;Flux;Counts", n_bins, flux_min, flux_max)
 
     for flux in flux_list:
         flux_hist.Fill(flux)
 
-    flux_fit_vals, flux_errors, flux_fit_graph = fit.do_edep_fit(np.array(flux_list), set_hist)
+    flux_fit_vals, flux_errors, flux_fit_graph, test_graph= fit.do_edep_fit(flux_list, set_hist)
 
     conv = flux_fit_vals[1]
     conv_err = np.sqrt(flux_errors[1][1])
@@ -305,6 +316,8 @@ if __name__ == "__main__":
     flux_fit_graph.SetLineColor(2)
     flux_fit_graph.SetLineWidth(3)
 
+    test_graph.SetLineColor(2)
+    test_graph.SetLineWidth(3)
 
 
     outFile = ROOT.TFile(newDir+"/fluxCorr_FLUX1600TEST.root", "RECREATE")
@@ -320,6 +333,10 @@ if __name__ == "__main__":
     latex.DrawLatex(20e3, 500, "Flux/MeV: %0.3f #pm %0.3f" % (conv, conv_err))
     c0.Write()
 
+
+    c1 = ROOT.TCanvas("Test")
+    test_graph.Draw("al")
+    c1.Write()
 
     c9 = ROOT.TCanvas("TimeFluxHist")
     time_flux_hist.DoFit()

@@ -269,31 +269,36 @@ def apply_smearing(edep_spectrum, evals, a, c):
     ret = np.sum([scale*smear*bin_width for scale, smear in zip(edep_spectrum, smears)],axis=0)
     return ret
 
+def get_mc_edep_prediction(data_bin_centers, binned_data, muons_info):
+    def edep_pred(*args):
+        scale = args[1]
+        escale = args[2]
+        smear1 = args[3]
+        smear2 = 0
+        mixing_frac = 0.5
+        bckg = binned_data[-1]
+        #print(scale, escale,smear1, smear2, mixing_frac, bckg)
+
+        mc_bin_centers = (np.linspace(0, 100, 200) + 0.5)[:-1]
+        mc_pred = muons_info.muplus_dist*mixing_frac + muons_info.muminus_dist*(1-mixing_frac)
+        mc_pred = (mc_pred*scale) + bckg
+
+        smeared_dist = apply_smearing(mc_pred, mc_bin_centers, smear1, smear2)
+
+        # Convert the MC prediction to flux and interpolate to re-create the flux data distribution
+        conv_bin_centers = (mc_bin_centers*escale)
+        return np.interp(data_bin_centers, conv_bin_centers, smeared_dist)
+    return edep_pred
+
 def edep_fit(args, data_bin_centers, binned_data, set_hist, muons_info) :
-    #scale = args[0]
-    escale = math.exp(args[0])
-    smear1 = args[1]
-    smear2 = args[2]
-    mixing_frac = args[3]
-    bckg = args[4]
-    #print(scale, escale,smear1, smear2, mixing_frac, bckg)
-
-    mc_bin_centers = (np.linspace(0, 100, 200) + 0.5)[:-1]
-    mc_pred = muons_info.muplus_dist*mixing_frac + muons_info.muminus_dist*(1-mixing_frac)
-    #mc_pred = (mc_pred*scale) + bckg
-    mc_pred = mc_pred + bckg
-
-    smeared_dist = apply_smearing(mc_pred, mc_bin_centers, smear1, smear2)
-
-    # Convert the MC prediction to flux and interpolate to re-create the flux data distribution
-    conv_bin_centers = (mc_bin_centers*escale)
-    conv_data = np.interp(data_bin_centers, conv_bin_centers, smeared_dist)
+    conv_data = get_mc_edep_prediction(args, data_bin_centers, binned_data, muons_info)
 
     chi2 = abs(np.sum((conv_data - binned_data)**2/conv_data))
-    #print("chi2 = ", chi2)
+    print("chi2 = ", chi2)
     return chi2
 
 def do_edep_fit(data_vals, set_hist):
+
 
     #data_dist = np.array([hdata[i+1] for i in range(hdata.GetNbinsX())])
     data_dist = data_vals
@@ -305,47 +310,63 @@ def do_edep_fit(data_vals, set_hist):
     binned_data = np.zeros(len(data_bins)-1)
     for i, bin_id in enumerate(data_bin_idx):
         # Ignore overflow bin data
-        if bin_id == len(data_bins):
+        if bin_id == 0 or bin_id == len(data_bins):
             continue
         #binned_data[bin_id-1] += data_dist[i]	# Raw data
         binned_data[bin_id-1] += 1		# Histogram
  
     my_muons = Muons(200)
+    #import pdb; pdb.set_trace()
 
-    meth_n = np.array([None, 'L-BFGS-B', 'Nelder-Mead', 'SLSQP', 'Powell', 'COBYLA'])#, 'TNC', 'BFGS'])
-    chi_list = []
-    suc_list = []
-    for i, name in enumerate(meth_n) :
-        print(name)
-        #bf_test = optimize.minimize(edep_fit, [np.log(960), 0.03, 0.03, 0.5, 0.0], bounds=[(np.log(500), np.log(1500)), (0.001, 1.0), (0.001, 1.0), (0.001, 1.0), (0.0, None)], method=name, args=(data_bin_centers, binned_data, set_hist, my_muons))
-        bf_test = optimize.basinhopping(edep_fit, [np.log(960), 0.05, 0.05, 0.5, 10], stepsize=0.001, minimizer_kwargs={'bounds':[(0, np.log(1e5)), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, None)], 'method':name, 'args':(data_bin_centers, binned_data, set_hist, my_muons)})
-        chi_list.append(bf_test.fun)
-        suc_list.append(bf_test.success)
-        print(bf_test)
-        if bf_test.fun < chi_list[i-1] and i > 0 and bf_test.success and bf_test.x.all()>=0:
-            bf = bf_test
-    print([(name, chi, suc) for name, chi, suc in sorted(zip(meth_n, chi_list, suc_list), key=lambda x : x[1])])
-    print(bf)
+    popt, pcov = optimize.curve_fit(get_mc_edep_prediction(data_bin_centers, binned_data, my_muons), data_bin_centers, binned_data, p0=[0.16, 945, 0.01], bounds=((0.0, 0.0, 0.0),(np.inf, 1e5, 1.0)))
+    #bf = optimize.minimize(edep_fit, [0.16, 945, 0.01, 0.01, 0.5, 10], bounds=[(0.0, None), (0.0, 1e5), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, None)], args=(data_bin_centers, binned_data, set_hist, my_muons))
+    #meth_n = np.array([None, 'L-BFGS-B', 'Nelder-Mead', 'SLSQP', 'Powell', 'COBYLA'])#, 'TNC', 'BFGS'])
+    #chi_list = []
+    #suc_list = []
+    #for i, name in enumerate(meth_n) :
+    #    print(name)
+    #    bf_test = optimize.minimize(edep_fit, [0.16, np.log(945), 0.01, 0.01, 0.5, 10], bounds=[(0.0, None), (0.0, np.log(1e5)), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, None)], method=name, args=(data_bin_centers, binned_data, set_hist, my_muons))
+        #bf_test = optimize.basinhopping(edep_fit, [0.16, np.log(945), 0.01, 0.01, 0.5, 10], stepsize=0.001, minimizer_kwargs={'bounds':[(0.0, None), (0, np.log(1e5)), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, None)], 'method':name, 'args':(data_bin_centers, binned_data, set_hist, my_muons)})
+    #    chi_list.append(bf_test.fun)
+    #    suc_list.append(bf_test.success)
+    #    print(bf_test)
+    #    if bf_test.fun < chi_list[i-1] and i > 0 and bf_test.success and bf_test.x.all()>=0:
+    #        bf = bf_test
+    #print([(name, chi, suc) for name, chi, suc in sorted(zip(meth_n, chi_list, suc_list), key=lambda x : x[1])])
+    #print(bf)
     #print(bf.hess_inv)
     #bf_err = np.sqrt(np.diag(bf.hess_inv.todense()))
+    #bf_err = bf.hess_inv.todense()
     #bf_err = np.sqrt(np.diag(np.linalg.inv(bf.hess)))
     #print(bf_err)
-    bf_err = [[0,0],[0,0]]    
+    #bf_err = [[0,0],[0,0]]    
 
     #my_bf = [21.9708, -0.652794, 0.026418, 0.0, 0.378431, 0]
     #bf.x = np.array(my_bf)
 
-    bf_escale = math.exp(bf.x[0])
+    #bf_scale = bf.x[0]
+    #bf_escale = bf.x[1]
+    #bf_smear1 = bf.x[2]
+    #bf_smear2 = bf.x[3]
+    #bf_mixing_frac = bf.x[4]
+    #bf_bckg = bf.x[5]
+
+    bf_err = pcov
+
+    bf_scale = popt[0]
+    bf_escale = popt[1]
+    bf_smear1 = popt[2]
+    bf_smear2 = 0
+    bf_mixing_frac = 0.5
+    bf_bckg = binned_data[-1]
 
     gbf = ROOT.TGraph()
 
     mc_bin_centers = (np.linspace(0, 100, 200) + 0.5)[:-1]
-    mc_pred = my_muons.muplus_dist
-    mc_pred = my_muons.muplus_dist*bf.x[3] + my_muons.muminus_dist*(1-bf.x[3])
-    #mc_pred = (mc_pred*bf.x[0]) + bf.x[5]
-    mc_pred = (mc_pred) + bf.x[4]
+    mc_pred = my_muons.muplus_dist*bf_mixing_frac + my_muons.muminus_dist*(1-bf_mixing_frac)
+    mc_pred = (mc_pred*bf_scale) + bf_bckg
 
-    test = apply_smearing(mc_pred, mc_bin_centers, bf.x[1], bf.x[2])
+    test = apply_smearing(mc_pred, mc_bin_centers, bf_smear1, bf_smear2)
     conv_bin_centers = (mc_bin_centers * bf_escale)
     conv_data = np.interp(data_bin_centers, conv_bin_centers, test)
 
@@ -376,7 +397,7 @@ def do_edep_fit(data_vals, set_hist):
     for i, (x,v) in enumerate(zip(data_bin_centers, conv_data)):
         gbf.SetPoint(i, x, v)
 
-    return bf.x, bf_err, gbf, testg 
+    return popt, bf_err, gbf, testg 
 
 def do_michel_fit(hist, full_errors=False):
     # Fit the given histogram with a Michel energy spectrum for the energy scale
