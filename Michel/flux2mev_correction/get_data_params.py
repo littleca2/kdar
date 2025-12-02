@@ -172,7 +172,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=str, help="input ROOT filename (update_michel_pair.cc output; michel_pair_{run#}.root if run type = 1 or michel_pair_combined.root if run type = 0)")
     parser.add_argument("runType", type=int, help="0: Sum, 1: Run, 2: Subrun")
-    parser.add_argument("version", type=str, help="timestamp to be used as version ID")
+    parser.add_argument("version", type=str, help="Name to be used as version ID")
     args = parser.parse_args()
     inputName = args.input
     RUN_TYPE = args.runType
@@ -287,8 +287,9 @@ if __name__ == "__main__":
     flux_list_slice = np.array([i for i in flux_list if i < flux_max and i > flux_min])
 
     # Compute the number of bins
-    n_bins_flux = len(np.histogram_bin_edges(flux_list_slice, bins='sqrt')) - 1
-
+    #n_bins_flux = len(np.histogram_bin_edges(flux_list_slice, bins='sqrt')) - 1
+    n_bins_flux = len(np.histogram_bin_edges(flux_list_slice, bins='rice')) - 1
+    #n_bins_flux = 100
     set_hist = {"n_bins" : n_bins_flux, "min" : flux_min, "max" : flux_max}
 
     flux_hist = ROOT.TH1D("flux_hist", "Michel Flux;Flux;Counts", n_bins_flux, flux_min, flux_max)
@@ -300,8 +301,8 @@ if __name__ == "__main__":
 
     conv = flux_fit_vals[1]
     conv_err = np.sqrt(flux_errors[1][1])
-    res = flux_fit_vals[2]
-    res_err = np.sqrt(flux_errors[2][2])
+    res_scale = flux_fit_vals[2]
+    res_scale_err = np.sqrt(flux_errors[2][2])
 
     print("File = %s, Conversion = %f +- %f" % (inputName, conv, conv_err))
     flux_fit_graph.SetLineColor(2)
@@ -334,8 +335,9 @@ if __name__ == "__main__":
     fid_list_slice = np.array([i for i in fid_list if i < fid_max and i > fid_min])
     
     # Compute the number of bins
-    n_bins_fid = len(np.histogram_bin_edges(fid_list_slice, bins='sqrt')) - 1
-    
+    #n_bins_fid = len(np.histogram_bin_edges(fid_list_slice, bins='sqrt')) - 1
+    n_bins_fid = len(np.histogram_bin_edges(fid_list_slice, bins='rice')) - 1
+    #n_bins_fid = 100
     fid_hist = ROOT.TH1D("fid_hist", "fid_hist", n_bins_fid, fid_min, fid_max)
 
     for E in fid_list:
@@ -416,7 +418,7 @@ if __name__ == "__main__":
 
     latex = ROOT.TLatex()
     latex.DrawLatex(5, 0.9*fid_hist.GetMaximum(), "Flux/MeV = %0.4f #pm %0.4f" % (conv, conv_err))
-    latex.DrawLatex(5, 0.8*fid_hist.GetMaximum(), "R_{ep} = %0.4f%% #pm %0.4f" % (res*100, res_err*100))
+    latex.DrawLatex(5, 0.8*fid_hist.GetMaximum(), "R_{ep} Scale = %0.4f%% #pm %0.4f" % (res_scale*100, res_scale_err*100))
     C.Write()
 
     c2 = ROOT.TCanvas("MC Spatial")
