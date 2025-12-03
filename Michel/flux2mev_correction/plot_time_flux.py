@@ -287,11 +287,16 @@ if __name__ == "__main__":
     first_time = (time.mktime(run_times[FIRST_RUN][0].timetuple()) - ROOT.gStyle.GetTimeOffset())
     last_time = (time.mktime(run_times[max(run_times.keys())][0].timetuple()) - ROOT.gStyle.GetTimeOffset())
 
-    # Histograms for comparing the current version's flux 2 MeV with our other data sets
+    # Histograms for comparing the current version's flux to MeV with our other data sets
     eric_comp_h = ROOT.TH1D("Fraction of Eric's Data","Fraction of Eric's Data",500,-1,2)
     dodo_comp_h = ROOT.TH1D("Fraction of Dodo's Data","Fractio of Dodo's Data",500,-1,2)
     hk_comp_h = ROOT.TH1D("Fraction of HK's Data","Fraction of HK'd Data",500,-1,2)
     comp_h = ROOT.TH1D("Fraction of Version %s's Data" % (compareID),"Fraction of Version %s's Data" % (compareID),500,-1,2)
+
+    # Histograms for comparing the current version's error with our other data sets
+    eric_comp_err_h = ROOT.TH1D("Difference with Eric's Data","Fraction of Eric's Data",500,-100,100)
+    hk_comp_err_h = ROOT.TH1D("Difference with HK's Data","Fraction of HK'd Data",500,-100,100)
+    comp_err_h = ROOT.TH1D("Difference with Version %s's Data" % (compareID),"Fraction of Version %s's Data" % (compareID),500,-100,100)
 
     # Get numerical comparison between the different corrections
     # HyoungKu, Dodo, and Eric's data uses a michel endpoint = 52.8 MeV
@@ -340,6 +345,7 @@ if __name__ == "__main__":
         run_idx = np.where(vals_per_period[0][:,0] == r)[0]
         if len(run_idx) == 1 :
             hk_comp_h.Fill((vals_per_period[0][run_idx[0], 2]/nominal_flux2mev_dict[0][0])/(v/hk_AVG_FLUX2MEV)*endpoint_scale)
+            hk_comp_err_h.Fill(vals_per_period[0][run_idx[0], 3] - err)
 
     # ===== Dodo's Data =====
     # Note: For comparisons sake, all of the data is normalized like the json/current data. Dodo's corrections have already been normalized, most likely with respect to the flux to MeV from the first run.
@@ -357,7 +363,6 @@ if __name__ == "__main__":
         run_idx = np.where(vals_per_period[0][:,0] == vr_tup[1])[0]
         if len(run_idx) == 1 :
             dodo_comp_h.Fill((vals_per_period[0][run_idx[0], 2]/nominal_flux2mev_dict[0][0])/vr_tup[0]*endpoint_scale)
-
  
     # ===== Eric's Data =====
     # Read in Eric's correction values to compare against
@@ -377,9 +382,6 @@ if __name__ == "__main__":
     eric_AVG_FLUX2MEV = np.average(list(eric_data_list[2]), weights=list(map(lambda x: 1.0/x, list(eric_data_list[3]))))
     #eric_AVG_FLUX2MEV_ERR = np.average(list(eric_data_list[3]), weights=list(map(lambda x: 1.0/x, list(eric_data_list[3]))))
 
-    # debug
-    eric_frac_dict = defaultdict(lambda : [])
-
     for i, (r, start, v, err) in enumerate(eric_data):
         geric.SetPoint(i, start, v/eric_AVG_FLUX2MEV)
         geric.SetPointError(i,0, err/eric_AVG_FLUX2MEV)
@@ -390,8 +392,7 @@ if __name__ == "__main__":
         if len(run_idx) == 1 :
             eric_frac = vals_per_period[0][run_idx[0], 2]/v*endpoint_scale
             eric_comp_h.Fill(eric_frac)
-            # debug
-            eric_frac_dict[r].append([eric_frac, v-vals_per_period[0][run_idx[0], 2]])
+            eric_comp_err_h.Fill(vals_per_period[0][run_idx[0], 3] - err)
 
     # ===== Comparison Data =====
     # Read in corrections for optional JSON version to compare against
@@ -411,97 +412,7 @@ if __name__ == "__main__":
                 run_idx = np.where(vals_per_period[0][:,0] == r)[0]
                 if len(run_idx) == 1 :
                     comp_h.Fill(vals_per_period[0][run_idx[0], 2]/v*compare_endpoint_scale)
-
-    # Test: Comparing the errors between current version and Eric's data
-    vals_err_sorted = sorted(vals_per_period[0], key=lambda x: x[3])
-    vals_err_sorted = np.array(vals_err_sorted)
-    currentNameE = str(versionID)+"_Error"
-    currentNameF = str(versionID)+"_Flux2MeV"
-    pd_data_dict = {currentNameE: [], currentNameF: [], "Eric_Error": [], "Eric_Flux2MeV": []}
-    pd_run_list = []
-
-    diff_list = []
-
-    eric_data = np.array(eric_data)
-    for (run, start, f2mev, err) in vals_err_sorted:
-        pd_run_list.append(run)
-        pd_data_dict[currentNameE].append(err)
-        pd_data_dict[currentNameF].append(f2mev)
-        # Find the corresponding run info for Eric's data
-        run_idx = np.where(eric_data[:,0] == run)[0]
-        if len(run_idx) == 1:
-            pd_data_dict["Eric_Error"].append(eric_data[run_idx, 3])
-            pd_data_dict["Eric_Flux2MeV"].append(eric_data[run_idx, 2])
-
-            diff_list.append(err-eric_data[run_idx, 3])
-
-        else:
-            pd_data_dict["Eric_Error"].append(None)
-            pd_data_dict["Eric_Flux2MeV"].append(None)
-    # Get the runs that only Eric's data has
-    eric_exclusive_runidx = np.where(~np.in1d(eric_data[:, 0], vals_err_sorted[:, 0]))[0]
-    for runidx in eric_exclusive_runidx:
-        pd_run_list.append(eric_data[run_idx, 0])
-        pd_data_dict["Eric_Error"].append(eric_data[runidx, 3])
-        pd_data_dict["Eric_Flux2MeV"].append(eric_data[runidx, 2])
-        pd_data_dict[currentNameE].append(None)
-        pd_data_dict[currentNameF].append(None)
-
-    current_err_smaller = sum(i<=0 for i in diff_list)[0]
-    percent_lte = float(current_err_smaller)/float(len(diff_list))*100
-    print("%f percent of %s events lave lower error than Eric's data" % (percent_lte, str(versionID)))
-
-    diff_h = ROOT.TH1D("Version-Eric","Version-Eric",650,min(diff_list), max(diff_list)+50)
-    for i in diff_list:
-        diff_h.Fill(i)
-
-    pd_outdata = pd.DataFrame(pd_data_dict, index = pd_run_list)
-    pd_outfile = OUTFILE_PATH+"/"+str(versionID)+"/compare_eric_error.csv"
-    pd_outdata.to_csv(pd_outfile, sep='\t')
-
-    # Test: Comparing the errors between current version and comparison versions data
-    vals_combined_i = [v for v in vals_per_period.values()]
-    vals_combined = []
-    for i in vals_combined_i:
-        for j in i:
-            vals_combined.append(j)
-    currentNameE = str(versionID)+"_Error"
-    currentNameF = str(versionID)+"_Flux2MeV"
-    secondNameE = str(compareID)+"_Error"
-    secondNameF = str(compareID)+"_Flux2MeV"
-    pd_data_dict2 = {currentNameE: [], currentNameF: [], secondNameE: [], secondNameF: []}
-    pd_run_list2 = []
-
-    diff_list2 = []
- 
-    for p_i, p_v in vals_per_period.items():
-        for run, start, f2mev, err in p_v:
-            pd_run_list2.append(run)
-            pd_data_dict2[currentNameE].append(err)
-            pd_data_dict2[currentNameF].append(f2mev)
-            run_idx = np.where(comp_vals[p_i][:,0] == run)[0]
-            if len(run_idx) == 1:
-                pd_data_dict2[secondNameE].append(comp_vals[p_i][run_idx, 3])
-                pd_data_dict2[secondNameF].append(comp_vals[p_i][run_idx, 2])
-
-                diff_list2.append(err-comp_vals[p_i][run_idx, 3])
- 
-            else:
-                pd_data_dict2[secondNameE].append(None)
-                pd_data_dict2[secondNameF].append(None)
-
-    current_err_smaller = sum(i<=0 for i in diff_list2)[0]
-    percent_lte = float(current_err_smaller)/float(len(diff_list2))*100
-    print("%f percent of %s events lave lower error than %s data" % (percent_lte, str(versionID), str(compareID)))
-
-    diff_h2 = ROOT.TH1D("Version-Compare","Version-Compare",650,min(diff_list2),max(diff_list2)+50)
-    for i in diff_list2:
-        diff_h2.Fill(i)
-
-    # If I want this to be robust, need to add the case for if the comp data has runs that the current doesnt 
-    pd_outdata2 = pd.DataFrame(pd_data_dict2, index = pd_run_list2)
-    pd_outfile2 = OUTFILE_PATH+"/"+str(versionID)+"/compare_"+str(compareID)+"_error.csv"
-    pd_outdata2.to_csv(pd_outfile2, sep='\t')
+                    comp_err_h.Fill(vals_per_period[0][run_idx[0], 3] - err)
 
     OUTFILE = OUTFILE_PATH+"/"+str(versionID)+"/time_flux_plots_"+str(versionID)+".root" 
     outFile = ROOT.TFile(OUTFILE, "RECREATE")
@@ -511,54 +422,10 @@ if __name__ == "__main__":
     hk_comp_h.Write()
     comp_h.Write()
 
-    diff_h.Write()
-    diff_h2.Write()
-
-    # Test: Compare error values via histogram
-    eric_err_h = ROOT.TH1D("Eric Flux-to-MeV Error","Eric Flux-to-MeV Error", 300,0,100)
-    val_err_h = ROOT.TH1D("Current Flux-to-MeV Error", "Current Flux-to-MeV Error", 300, 0, 100)
-    for run, start, f2mev, err in vals_per_period[0]:
-        val_err_h.Fill(err)
-    for run, start, f2mev, err in eric_data:
-        eric_err_h.Fill(err)
-    c_err = ROOT.TCanvas("Eric Compare Errors")
-    err_stack = ROOT.THStack("","")
-    val_err_h.Scale(1.0/val_err_h.Integral())
-    eric_err_h.Scale(1.0/eric_err_h.Integral())
-    val_err_h.SetFillColor(ROOT.kRed)
-    val_err_h.SetLineColor(ROOT.kRed)
-    eric_err_h.SetFillColor(ROOT.kBlue)
-    eric_err_h.SetLineColor(ROOT.kBlue)
-    err_stack.Add(val_err_h)
-    err_stack.Add(eric_err_h)
-    #ROOT.gPad.BuildLegend(0.75, 0.75, 0.95, 0.95, "")
-    err_stack.Draw("nostack B")
-    leg_err = ROOT.TLegend(0.1, 0.66, 0.45, 0.9)
-    leg_err.AddEntry(val_err_h, "Current Error", "line")
-    leg_err.AddEntry(eric_err_h, "Eric Error", "line")
-    c_err.Write()
-   
-    comp_err_h = ROOT.TH1D("Compare Flux-to-MeV Error", "Compare Flux-to-MeV Error", 300, 0, 100)
-    all_vals_err_h = ROOT.TH1D("Current Version Flux-to-MeV Error", "Current Version Flux-to-MeV Error", 300, 0, 100)
-    for p_i, p_v in comp_vals.items():
-        for run, start, f2mev, err in p_v:
-            comp_err_h.Fill(err)
-    for p_i, p_v in vals_per_period.items():
-        for run, start, f2mev, err in p_v:
-            all_vals_err_h.Fill(err)
-    c_err2 = ROOT.TCanvas("Version %s Compare Errors" % (str(compareID)))
-    err_stack2 = ROOT.THStack("","")
-    comp_err_h.Scale(1.0/comp_err_h.Integral())
-    comp_err_h.SetFillColor(ROOT.kViolet)
-    comp_err_h.SetLineColor(ROOT.kViolet)
-    all_vals_err_h.Scale(1.0/all_vals_err_h.Integral())
-    all_vals_err_h.SetFillColor(ROOT.kRed)
-    all_vals_err_h.SetLineColor(ROOT.kRed)
-    err_stack2.Add(comp_err_h)
-    err_stack2.Add(all_vals_err_h)
-    err_stack2.Draw("nostack B")
-    c_err2.Write()
-
+    eric_comp_err_h.Write()
+    dodo_comp_err_h.Write()
+    hk_comp_err_h.Write()
+    comp_err_h.Write()
 
     # Get the trend line of current version correction data for each period
     gtrend_indiv = []
@@ -588,7 +455,6 @@ if __name__ == "__main__":
         gtrend_all[p_i].SetFillStyle(3001)
 
     # Plot the current version corrections flux to MeV and its trend line
-    # TODO plot each run individually, too
     c1 = ROOT.TCanvas("%s F2MeV Absolute" % (versionID))
     mg0 = ROOT.TMultiGraph()
     for p_i in vals_per_period:
