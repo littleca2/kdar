@@ -11,7 +11,7 @@ VERSIONID=	# The key timestamp for this set of data, usually same as the Sum val
 ERICDATA=0	# Are we using Eric's data? This will be deleted later, probably
 
 if [ $ERICDATA -eq 0 ]; then
-	INDIR="/home/littleca/kdar/cleanerKDAR/Michel/output_updateMichelPair"
+	INDIR="/home/littleca/kdar/Michel/output_updateMichelPair"
 	#OUTDIR="/home/littleca/kdar/cleanerKDAR/Michel/flux2mev_correction/output_fluxCorr"
 
 	if [ $RUNTYPE -eq 0 ]; then
@@ -41,8 +41,8 @@ if [ $ERICDATA -eq 0 ]; then
 	fi
 
 else	#Using Eric's data
-	INDIR="/home/littleca/kdar/cleanerKDAR/Michel/old_eric_updateMichelPair"
-	OUTDIR="/home/littleca/kdar/cleanerKDAR/Michel/flux2mev_correction/output_fluxCorr"
+	INDIR="/home/littleca/kdar/Michel/old_eric_updateMichelPair"
+	OUTDIR="/home/littleca/kdar/Michel/flux2mev_correction/output_fluxCorr"
 	if [ $RUNTYPE -eq 0 ]; then
 		#timestamp=$(date +%s)
 
