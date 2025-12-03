@@ -1,8 +1,13 @@
 """
-Taken from McCaffrey:
-/home/marzece/KDAR_Analysis/MichelAnalysis/f2mev_correction/plot_time_flux.py
+	Originally from McCaffrey:
+	/home/marzece/KDAR_Analysis/MichelAnalysis/f2mev_correction/plot_time_flux.py
 
-description tbd
+	Takes the michel fit values for the flux to MeV conversion from correction_values.json
+	and plots the the flux to MeV over time. Data taking periods are automatically assigned
+	based on the dates associated with the runs and a user defined length of time between periods.
+
+	The input conversion values from correction_values.json are compared to those from HyoungKu Jeon, Eric Marzec, and Taku Dodo (all 2021)
+	as well as a single user defined version from the json file.
 
 """
 
@@ -31,8 +36,7 @@ TREND_WIDTH = 2.0*24*3600
 DOWNTIME_BTWN_PERIODS = 5.26e6    # Seconds
 
 # From https://github.com/JSNS2/AnalysisTools/blob/main/EnergyCorrection/20240312/TimeCorrection_2021.txt
-dodo_correction = [[1596,0,1600,2531,1], [1600,2532,1609,2817,1.00182], [1609,2818,1625,1791,1.0058], [1625,1792,1625,6791,1.00486], [1625,6792,1626,915,1.00604], [1626,916,1634,810,1.00505], [1634,811,1672,637,1.00625], [1672,638,1678,544,1.00466], [1678,545,1678,5544,1.00406], [1678,5545,1684,1607,1.00375], [1684,1608,1684,6607,1.00273], [1684,6608,1689,9,1.00395], [1689,10,1689,5009,1.00644], [1689,5010,1689,10009,1.00338], [1689,10010,1692,1719,1.00691], [1692,1720,1717,1996,1.00915], [1717,1997,1718,1104,1.01197], [1718,1105,1718,6104,1.01135], [1718,6105,1722,1281,1.01209], [1722,1282,1725,330,1.01121], [1725,331,1726,1637,1.01254], [1726,1638,1729,3434,1.01154], [1729,3435,1749,3244,1.0146], [1749,3245,1769,681,1.0108], [1769,682,1785,1724,1.00911], [1785,1725,1787,4457,1.01003], [1787,4458,1788,4147,1.01104], [1788,4148,1790,3500,1.01153], [1790,3501,1814,825,1.01248], [1814,826,1815,4482,1.00921], [1815,4483,1818,1196,1.00951], [1818,1197,1826,1543,1.01118], [1826,1544,1828,2560,1.01114], [1828,2561,1830,2419,1.0121], [1830,2420,1831,1358,1.01458], [1831,1359,1837,993,1.01308], [1837,994,1839,2722,1.01577], [1839,2723,1839,7722,1.01571], [1839,7723,1843,4380,1.02102], [1843,4381,1850,3640,1.02025], [1850,3641,1850,8640,1.02026], [1850,8641,1850,13640,1.02502], [1850,13641,1864,357,1.02644], [1864,358,1867,239,1.02869], [1867,240,1874,302,1.02494], [1874,303,1878,2860,1.02688], [1878,2861,1878,7860,1.0261], [1878,7861,1879,1355,1.02415], [1879,1356,1909,2369,1.02553], [1909,2370,1909,7369,1.02369], [1909,7370,1910,4198,1.02243], [1910,4199,1914,1908,1.02243], [1914,1909,1916,3446,1.02531], [1916,3447,1916,8446,1.02344], [1916,8447,1917,2033,1.02223], [1917,2034,1922,151,1.02324], [1922,152,1923,3166,1.02255], [1923,3167,1930,54,1.02148], [1930,55,1936,1808,1.02211], [1936,1809,1940,3594,1.01947], [1940,3595,1944,1517,1.01794], [1944,1518,1944,6517,1.01917], [1944,6518,1950,193,1.01657], [1950,194,1952,1348,1.0176], [1952,1349,1953,220,1.01794]]
-
+dodo_correction = np.loadtxt("/home/littleca/kdar/Michel/flux2mev_correction/Dodo_correction.txt")
 
 def gaussian(x,mu=0.0,sigma=1.0):
     return np.exp(-0.5*((x-mu)/sigma)**2)/(sigma*np.sqrt(2*np.pi))
@@ -50,12 +54,6 @@ def get_trend_line_simple(points):
     # If there are large periods of time between runs, the time_weight will be nonsense
     # So we will calculate the trend line for each seperate run period
     time_weights = np.array([gaussian(points[:,0], mu=x0, sigma=sigma) for x0 in xax])
-
-    # debug
-    for x0 in xax:
-        w = gaussian(points[:,0], mu=x0, sigma=sigma)
-    #    if sum(w) < 1e-50:
-    #        print(sum(w), x0)
 
     mean_vals = np.array([np.average(points[:, 1], weights=w*point_err_weight) for w in time_weights])
     results[:, 1] = mean_vals
@@ -222,15 +220,16 @@ def get_json_correction(versionID, run_times):
 
     vals_per_period = get_period_values(vals)
 
+    # Find the nominal flux ot MeV (the weighted average value) and it's error for all run periods and for each individual period
+    # The weight is 1/flux to mev error
+    # We will normalize our results later with respect to this average
     all_vals = list(itertools.chain.from_iterable(vals_per_period.values()))
     all_vals = np.array(all_vals)
-    # Find the average value for flux to MeV and it's error for all run periods and for each individual period
-    # We will normalize our results later with respect to this average
-    nominal_f2mev_dict = defaultdict(lambda: [])
 
-    all_f2mev = np.average(all_vals[:,2], weights=list(map(lambda x: 1.0/x, all_vals[:,2])))
+    all_f2mev = np.average(all_vals[:,2], weights=list(map(lambda x: 1.0/x, all_vals[:,3])))
     all_f2mev_err = np.average(all_vals[:,3], weights=list(map(lambda x: 1.0/x, all_vals[:,3])))
 
+    nominal_f2mev_dict = defaultdict(lambda: [])
     nominal_f2mev_dict['all'] = np.array([all_f2mev, all_f2mev_err])
 
     for p_i in vals_per_period:
@@ -302,11 +301,11 @@ if __name__ == "__main__":
 
     # Fill TGraph data for various data sets
     gabs = []						# Array of TGraphErrors of current version data
-    gmine_indiv = []				# Array of TGraphErros of current version data (normalized wrt average flux to MeV per period)
+    gmine_indiv = []					# Array of TGraphErros of current version data (normalized wrt average flux to MeV per period)
     gmine_all = []					# Array of TGraphErros of current version data (normalized wrt average flux to MeV for all periods)
-    ghk = ROOT.TGraphErrors()		# HyoungKu's data (normalized wrt average flux to MeV)
-    gdodo = ROOT.TGraph()			# Dodo's data (normalized wrt first run's flux to MeV)
-    geric = ROOT.TGraphErrors()		# Eric's data (normalized wrt average flux to MeV)
+    ghk = ROOT.TGraphErrors()				# HyoungKu's data (normalized wrt average flux to MeV)
+    gdodo = ROOT.TGraph()				# Dodo's data (normalized wrt first run's flux to MeV)
+    geric = ROOT.TGraphErrors()				# Eric's data (normalized wrt average flux to MeV)
 
     # ===== Current Version Data =====
     vals_per_period, nominal_flux2mev_dict = get_json_correction(versionID, run_times)
@@ -324,8 +323,6 @@ if __name__ == "__main__":
 
             gabs[p_i].SetPoint(i, start, v)
             gabs[p_i].SetPointError(i,0, err)
-
-    # Let's get the POT for each period we're analyzing
 
     # ===== HyoungKu's Data =====
     hk_vals = get_hyoungkus_correction(run_times)
@@ -345,7 +342,8 @@ if __name__ == "__main__":
             hk_comp_h.Fill((vals_per_period[0][run_idx[0], 2]/nominal_flux2mev_dict[0][0])/(v/hk_AVG_FLUX2MEV)*endpoint_scale)
 
     # ===== Dodo's Data =====
-    # TODO Double check I can't normalize wrt average like the others. I know it's already normalized but can I, like, do it again?
+    # Note: For comparisons sake, all of the data is normalized like the json/current data. Dodo's corrections have already been normalized, most likely with respect to the flux to MeV from the first run.
+    # So comparisons against Dodo's data may not be super accurate.
     # Clean up the data from Dodo at the start of the code
     dodo_correction = [(get_time(r, srn), v, r) for r, srn, _, _, v in dodo_correction]
     dodo_correction_withRun = {time.mktime(t.timetuple()) - ROOT.gStyle.GetTimeOffset(): (v, r) for t, v, r in dodo_correction if t is not None}	# So I can have the run # to use with comparison histogram
@@ -422,6 +420,8 @@ if __name__ == "__main__":
     pd_data_dict = {currentNameE: [], currentNameF: [], "Eric_Error": [], "Eric_Flux2MeV": []}
     pd_run_list = []
 
+    diff_list = []
+
     eric_data = np.array(eric_data)
     for (run, start, f2mev, err) in vals_err_sorted:
         pd_run_list.append(run)
@@ -432,6 +432,9 @@ if __name__ == "__main__":
         if len(run_idx) == 1:
             pd_data_dict["Eric_Error"].append(eric_data[run_idx, 3])
             pd_data_dict["Eric_Flux2MeV"].append(eric_data[run_idx, 2])
+
+            diff_list.append(err-eric_data[run_idx, 3])
+
         else:
             pd_data_dict["Eric_Error"].append(None)
             pd_data_dict["Eric_Flux2MeV"].append(None)
@@ -443,6 +446,14 @@ if __name__ == "__main__":
         pd_data_dict["Eric_Flux2MeV"].append(eric_data[runidx, 2])
         pd_data_dict[currentNameE].append(None)
         pd_data_dict[currentNameF].append(None)
+
+    current_err_smaller = sum(i<=0 for i in diff_list)[0]
+    percent_lte = float(current_err_smaller)/float(len(diff_list))*100
+    print("%f percent of %s events lave lower error than Eric's data" % (percent_lte, str(versionID)))
+
+    diff_h = ROOT.TH1D("Version-Eric","Version-Eric",650,min(diff_list), max(diff_list)+50)
+    for i in diff_list:
+        diff_h.Fill(i)
 
     pd_outdata = pd.DataFrame(pd_data_dict, index = pd_run_list)
     pd_outfile = OUTFILE_PATH+"/"+str(versionID)+"/compare_eric_error.csv"
@@ -460,6 +471,8 @@ if __name__ == "__main__":
     secondNameF = str(compareID)+"_Flux2MeV"
     pd_data_dict2 = {currentNameE: [], currentNameF: [], secondNameE: [], secondNameF: []}
     pd_run_list2 = []
+
+    diff_list2 = []
  
     for p_i, p_v in vals_per_period.items():
         for run, start, f2mev, err in p_v:
@@ -470,11 +483,22 @@ if __name__ == "__main__":
             if len(run_idx) == 1:
                 pd_data_dict2[secondNameE].append(comp_vals[p_i][run_idx, 3])
                 pd_data_dict2[secondNameF].append(comp_vals[p_i][run_idx, 2])
+
+                diff_list2.append(err-comp_vals[p_i][run_idx, 3])
+ 
             else:
                 pd_data_dict2[secondNameE].append(None)
                 pd_data_dict2[secondNameF].append(None)
 
-    # TODO If I want this to be robust, need to add the case for if the comp data has runs that the current doesnt 
+    current_err_smaller = sum(i<=0 for i in diff_list2)[0]
+    percent_lte = float(current_err_smaller)/float(len(diff_list2))*100
+    print("%f percent of %s events lave lower error than %s data" % (percent_lte, str(versionID), str(compareID)))
+
+    diff_h2 = ROOT.TH1D("Version-Compare","Version-Compare",650,min(diff_list2),max(diff_list2)+50)
+    for i in diff_list2:
+        diff_h2.Fill(i)
+
+    # If I want this to be robust, need to add the case for if the comp data has runs that the current doesnt 
     pd_outdata2 = pd.DataFrame(pd_data_dict2, index = pd_run_list2)
     pd_outfile2 = OUTFILE_PATH+"/"+str(versionID)+"/compare_"+str(compareID)+"_error.csv"
     pd_outdata2.to_csv(pd_outfile2, sep='\t')
@@ -486,6 +510,9 @@ if __name__ == "__main__":
     dodo_comp_h.Write()
     hk_comp_h.Write()
     comp_h.Write()
+
+    diff_h.Write()
+    diff_h2.Write()
 
     # Test: Compare error values via histogram
     eric_err_h = ROOT.TH1D("Eric Flux-to-MeV Error","Eric Flux-to-MeV Error", 300,0,100)

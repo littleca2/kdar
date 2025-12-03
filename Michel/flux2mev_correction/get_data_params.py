@@ -1,6 +1,14 @@
+"""
+	Originally from Alex on McCaffrey at /home/marzece/KDAR_Analysis/MichelAnalysis/AlexMichel/
+	
+	Takes the parsed michel data from updateMichelPair and returns an addition to the json file
+	correction_values.json as well as individual ROOT files with the fits.
 
-
-
+	On running, the user must declare if it will find the fit for
+	0: all the data in michel_pair_combined.root
+	1: Each run
+	2: Each subrun (not implemented)
+"""
 
 import ROOT
 import numpy as np
@@ -72,7 +80,7 @@ def get_run_dates():
     return run_times
 
 def get_hyoungkus_correction(run):
-    path = "/home/marzece/KDAR_Analysis/HyounkuCode/kdar/Ver2/code/dat/FluxMeVCorr_time_blessed"
+    path = "/home/littleca/kdar/Michel/flux2mev_correction/HyoungKu_correction/"
     fn = "Run_%i_timeCorr.dat" % run
     if os.path.isfile(os.path.join(path, fn)) :
         fin = open(os.path.join(path, fn))
@@ -156,17 +164,6 @@ class RunBasedHistogram():
         self.tline.Draw('same')
 
 
-def GetHyoungkus_Position_Correction():
-    fin = open("/home/marzece/KDAR_Analysis/HyounkuCode/kdar/Ver2/code/dat/FluxMeVCorr_spacial.dat")
-    lines = [line.replace("  ", " ") for line in fin.readlines()]
-    lines = [line.split(" ") for line in lines]
-    vals = [[int(x[0]), int(x[1]), float(x[2])] for x in lines]
-    hk_h2 = ROOT.TH2D("", "", 12, 0, 2.56e6, 10, -1.25e3, 1.25e3)
-    for xbin, ybin, v in vals:
-        hk_h2.SetBinContent(xbin+1, ybin+1, v)
-    return hk_h2
-
-
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
@@ -205,6 +202,8 @@ if __name__ == "__main__":
            data_vals = json.load(f)
 
         # Check that this version has a sum correction
+        # If so, use it for the FLUX2MEV value
+        # If not, prompt the use to confirm the use of the default value
         sumlist = []
         if versionID in data_vals.keys():
             # Get the name of the "sum"key for this version
@@ -237,12 +236,9 @@ if __name__ == "__main__":
                 else :
                     print("Please respond with 'yes' or 'no' or press enter to continue")
 
-    #location_hist = fit.PositionBasedHistograms("", "", 12, 0, 1.0, 12, -1500, 1500, 100, flux_min/FLUX2MEV, flux_max/FLUX2MEV)
     location_flux_hist = fit.PositionBasedHistograms("", "", NBINS_R, 0, R_MAX, NBINS_Z, Z_MIN, Z_MAX, 100, flux_min, flux_max)
     location_deltat_hist = fit.PositionBasedHistograms("", "", NBINS_R, 0, R_MAX, NBINS_Z, Z_MIN, Z_MAX, 100, 2, 10)
     delt_hist = ROOT.TH1D("", "", 200, 0, 10)
-    #time_flux_hist = RunBasedHistogram("", "", 100, flux_min/FLUX2MEV, flux_max/FLUX2MEV)
-    time_flux_hist = RunBasedHistogram("", "", 100, flux_min, flux_max)
 
 
     # Grab the Data to analyze
@@ -287,7 +283,6 @@ if __name__ == "__main__":
     flux_list_slice = np.array([i for i in flux_list if i < flux_max and i > flux_min])
 
     # Compute the number of bins
-    #n_bins_flux = len(np.histogram_bin_edges(flux_list_slice, bins='sqrt')) - 1
     n_bins_flux = len(np.histogram_bin_edges(flux_list_slice, bins='rice')) - 1
     #n_bins_flux = 100
     set_hist = {"n_bins" : n_bins_flux, "min" : flux_min, "max" : flux_max}
@@ -297,6 +292,7 @@ if __name__ == "__main__":
     for flux in flux_list:
         flux_hist.Fill(flux)
 
+    # Fit the data for y-axis scaling (unused), flux to MeV energy scaling, and energy resolution scaling factor
     flux_fit_vals, flux_errors, flux_fit_graph = fit.do_edep_fit(flux_list, set_hist)
 
     conv = flux_fit_vals[1]
@@ -308,7 +304,10 @@ if __name__ == "__main__":
     flux_fit_graph.SetLineColor(2)
     flux_fit_graph.SetLineWidth(2)
 
+    time_e_hist = RunBasedHistogram("", "", 100, flux_min/conv, flux_max/conv)
+
     fid_list = []
+    # Go through events again, convert their energy to MeV and apply michel cuts
     for i in range(n_entries):
         energy_tree.GetEntry(i)
         #if(energy_tree.time_since_kicker < KICKER_DEAD_TIME):
@@ -335,7 +334,6 @@ if __name__ == "__main__":
     fid_list_slice = np.array([i for i in fid_list if i < fid_max and i > fid_min])
     
     # Compute the number of bins
-    #n_bins_fid = len(np.histogram_bin_edges(fid_list_slice, bins='sqrt')) - 1
     n_bins_fid = len(np.histogram_bin_edges(fid_list_slice, bins='rice')) - 1
     #n_bins_fid = 100
     fid_hist = ROOT.TH1D("fid_hist", "fid_hist", n_bins_fid, fid_min, fid_max)
@@ -400,9 +398,10 @@ if __name__ == "__main__":
     flux_hist.Draw("SAMEE")
     latex = ROOT.TLatex()
     latex.DrawLatex(1000, 0.8*flux_hist.GetMaximum(), "Flux/MeV: %0.3f #pm %0.3f" % (conv, conv_err))
+    latex.DrawLatex(5, 0.8*fid_hist.GetMaximum(), "R_{ep} Scale = %0.4f%% #pm %0.4f" % (res_scale*100, res_scale_err*100))
     c0.Write()
 
-    C = ROOT.TCanvas("MC Parameters")
+    C = ROOT.TCanvas("Conv Michel E")
     fid_hist.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
     fid_hist.GetYaxis().SetTitle("Counts/%0.1fMeV" % fid_hist.GetBinWidth(1))
     fid_hist.GetYaxis().SetRangeUser(0, 1.5*fid_hist.GetMaximum())
@@ -464,10 +463,14 @@ if __name__ == "__main__":
 #    c6 = ROOT.TCanvas()
 #    location_flux_hist.DrawFit(c5, c6)
 
-    #c9 = ROOT.TCanvas("TimeFluxHist")
-    #time_flux_hist.DoFit()
-    #time_flux_hist.Draw()
-    #c9.Write()
+#    c9 = ROOT.TCanvas("TimeFluxHist")
+#    time_e_hist.DoFit()
+#    time_e_hist.Draw()
+#    c9.Write()
+
+#    c10 = ROOT.TCanvas()
+#    location_deltat_hist.Draw()
+#    c10.Write()
 
     # Create Multisim parameter sets for Systematics
     # Decompose the cov matrix for sampling
@@ -478,34 +481,6 @@ if __name__ == "__main__":
         # TODO there's probably a more numpy way of calculating this
     #    p = fit_vals + np.dot(cky, random_vec)
     #    mc_smear_param_tree.Fill(p[0], p[1], p[2])
-    #outFile.cd()
     #mc_smear_param_tree.Write()
     #outFile.Close()
-#    c10 = ROOT.TCanvas()
-#    location_deltat_hist.Draw(c10)
 
-#    c7 = ROOT.TCanvas("HK Compare")
-#    h_hk = GetHyoungkus_Position_Correction()
-#    h_hk.GetXaxis().SetTitle("#rho^{2} [mm]")
-#    h_hk.GetYaxis().SetTitle("Z [mm]")
-#    h_hk.Draw("colz")
-#    h_hk.Draw("TEXTcolz")
-#
-#    hk = np.zeros((h_hk.GetNbinsX(), h_hk.GetNbinsY()))
-#    mine = np.zeros((h_hk.GetNbinsX(), h_hk.GetNbinsY()))
-#    mine_err = np.zeros((h_hk.GetNbinsX(), h_hk.GetNbinsY()))
-#    hdiff = ROOT.TH2D("", "", h_hk.GetNbinsX(), 0, 2.56e6, 10, -1.25e3, 1.25e3)
-#    hdiff2 = ROOT.TH2D("", "", h_hk.GetNbinsX(), 0, 2.56e6, 10, -1.25e3, 1.25e3)
-#    for xbin in range(h_hk.GetNbinsX()):
-#        for ybin in range(h_hk.GetNbinsY()):
-#            hk[xbin, ybin] = h_hk.GetBinContent(xbin+1, ybin+1)
-#            mine[xbin, ybin] = location_flux_hist.scale_h2.GetBinContent(xbin+1, ybin+1)
-#            mine_err[xbin, ybin] = location_flux_hist.scale_h2.GetBinError(xbin+1, ybin+1)
-#            # Take the error to be sqrt(2) times larger to compensate for the fact
-#            # that I don't know the error on Hyoungku's measurement
-#            err = mine_err[xbin, ybin]*np.sqrt(2.0)
-#            hdiff.SetBinContent(xbin+1, ybin+1, mine[xbin,ybin]-hk[xbin, ybin])
-#            hdiff2.SetBinContent(xbin+1, ybin+1, (mine[xbin,ybin]-hk[xbin, ybin])/err)
-#    c7.Write()
-#    outFile.Close()
-#data_file.Close()
