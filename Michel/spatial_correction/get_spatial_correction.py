@@ -142,7 +142,7 @@ if __name__ == "__main__":
     # Read in MC data
     MC_file = ROOT.TFile(mc_filename, "READ")
     MC_tree = MC_file["energy_tree"]
-    x_MC, y_MC, z_MC, E_MC, ptype_MC = zip(*[[evt.x, evt.y, evt.z, evt.E, evt.PDG] for evt in MC_tree])
+    x_MC, y_MC, z_MC, flux_MC, ptype_MC = zip(*[[evt.x, evt.y, evt.z, evt.flux, evt.PDG] for evt in MC_tree])
     MC_file.Close()
     print("MC data loaded")
 
@@ -154,6 +154,8 @@ if __name__ == "__main__":
     # Ratio mu+/mu- = 1.21 from PRD 74.082006
     plus_weight *= 1.21
     minus_weight *= 1.
+
+    # Calculate energy in MeV from flux
 
     ##### Perform Fit of the Inner Energy Hist for MC Data #####
     inner_MC = [[E, (x, y, z), ptype] for E,x,y,z,ptype in zip(E_MC, x_MC, y_MC, z_MC, ptype_MC) if np.sqrt(x**2 + y**2) < R_FV and Z_FV_LOW < z < Z_FV_HIGH and E > 20.0]
@@ -236,8 +238,12 @@ if __name__ == "__main__":
     sigma_smear = np.sqrt(res_data_avg**2 - res_MC**2)
     smeared_MC = fit.apply_smearing(E_MC_nphist, E_MC_bin_centers, sigma_smear, 0)
 
-    E_mc_hist_s = ROOT.TH1D("smeared_MC", "smeared_MC", n_bin, min_E, max_E)
-    [E_mc_hist_s.Fill(E) for E in smeared_MC]
+    E_mc_g_s = ROOT.TGraph()
+    for i, (x,y) in enumerate(zip(E_MC_bin_centers, smeared_MC)):
+        E_mc_g_s.SetPoints(i, x, y)
+
+    #E_mc_hist_s = ROOT.TH1D("smeared_MC", "smeared_MC", n_bin, min_E, max_E)
+    #[E_mc_hist_s.Fill(E) for E in smeared_MC]
 
     MC_fit_vals_s, MC_fit_err_s, MC_fit_graph_s, MC_fit_chi2_s = fit.do_edep_fit(smeared_MC, set_hist, escale=1.0)
 
@@ -273,7 +279,7 @@ if __name__ == "__main__":
     leg0.AddEntry(E_mc_hist, "MC Data", "l")
     leg0.AddEntry(MC_fit_graph, "Michel Fit", "l")
     leg0.AddEntry("", "Scale: %0.5f #pm %0.5f" % (scale_MC, scale_MC_err), "")
-    leg0.AddEntry("", "Ep Res: %0.3f%% #pm %0.3f" % (res_MC, res_MC_err), "")
+    leg0.AddEntry("", "Ep Res: %0.3f%% #pm %0.3f" % (res_MC*100, res_MC_err*100), "")
     leg0.Draw("same")
     c0.Write()
 
@@ -300,13 +306,20 @@ if __name__ == "__main__":
         c1[period].Write()
 
     c2 = ROOT.TCanvas("Inner Michel Reco E: Smeared MC")
-    E_mc_hist_s.SetTitle("Smeared MC")
-    E_mc_hist_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
-    E_mc_hist_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
-    E_mc_hist_s.SetStats(0)
-    E_mc_hist_s.SetLineColor(ROOT.kBlue)
-    E_mc_hist_s.SetLineWidth(2)
-    E_mc_hist_s.Draw("HISTE")
+    #E_mc_hist_s.SetTitle("Smeared MC")
+    #E_mc_hist_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
+    #E_mc_hist_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
+    #E_mc_hist_s.SetStats(0)
+    #E_mc_hist_s.SetLineColor(ROOT.kBlue)
+    #E_mc_hist_s.SetLineWidth(2)
+    #E_mc_hist_s.Draw("HISTE")
+    E_mc_g_s.SetTitle("Smeared MC")
+    E_mc_g_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
+    E_mc_g_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
+    E_mc_g_s.SetStats(0)
+    E_mc_g_s.SetLineColor(ROOT.kBlue)
+    E_mc_g_s.SetLineWidth(2)
+    E_mc_g_s.Draw("AP")
     MC_fit_graph_s.SetLineColor(2)
     MC_fit_graph_s.SetLineWidth(2)
     MC_fit_graph_s.Draw("Same")
