@@ -4,7 +4,7 @@ import ROOT
 import sys
 import matplotlib.pyplot as plt
 from scipy import optimize
-#from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit
 import math
 
 MICHEL_E_ENDPOINT = 53.3
@@ -271,16 +271,16 @@ def apply_smearing(edep_spectrum, evals, a, c):
 
 def get_mc_edep_prediction(data_bin_centers, binned_data, muons_info):
     def edep_pred(*args):
-        scale = args[1]
-        escale = args[2]
-        smear1 = args[3]
+        scale = args[1]		#yscale
+        escale = args[2]	#escale
+        smear1 = args[3]	#resscale
         smear2 = 0
-        mixing_frac = 0.5
+        mixing_frac = 1.21	#mu+ weight from PRD 74.082006
         bckg = binned_data[-1]
         #print(scale, escale,smear1, smear2, mixing_frac, bckg)
 
-        mc_bin_centers = (np.linspace(0, 100, 200) + 0.5)[:-1]
-        mc_pred = muons_info.muplus_dist*mixing_frac + muons_info.muminus_dist*(1-mixing_frac)
+        mc_bin_centers = (np.linspace(0, 100, 400) + 0.125)[:-1]
+        mc_pred = muons_info.muplus_dist*mixing_frac + muons_info.muminus_dist
         mc_pred = (mc_pred*scale) + bckg
 
         smeared_dist = apply_smearing(mc_pred, mc_bin_centers, smear1, smear2)
@@ -290,18 +290,20 @@ def get_mc_edep_prediction(data_bin_centers, binned_data, muons_info):
         return np.interp(data_bin_centers, conv_bin_centers, smeared_dist)
     return edep_pred
 
-def edep_fit(args, data_bin_centers, binned_data, set_hist, muons_info) :
-    conv_data = get_mc_edep_prediction(args, data_bin_centers, binned_data, muons_info)
+def edep_chi2(binned_data, conv_data=None, args=None, data_bin_centers=None, set_hist=None, muons_info=None) :
+    if len(conv_data)==0:
+        conv_data = get_mc_edep_prediction(args, data_bin_centers, binned_data, muons_info)
 
-    chi2 = abs(np.sum((conv_data - binned_data)**2/conv_data))
+    numerator = (conv_data - binned_data)**2
+    chi2 = abs(np.sum(np.divide(numerator, conv_data, out=np.zeros_like(numerator), where=conv_data!=0)))
     print("chi2 = ", chi2)
     return chi2
 
-def do_edep_fit(data_vals, set_hist):
+def do_edep_fit(data_vals, set_hist, yscale=0.16, escale=945, resscale=0.01):
 
 
     data_dist = data_vals
-    # Re-bin the flux data
+    # Bin the flux data into a histogram
     data_bin_width = float(set_hist["max"] - set_hist["min"]) / float(set_hist["n_bins"])
     data_bin_centers = np.linspace( (set_hist["min"] + float(data_bin_width)/2), (set_hist["max"] - (float(data_bin_width)/2)), set_hist["n_bins"])
     data_bins = np.linspace(set_hist["min"], set_hist["max"], set_hist["n_bins"]+1)
@@ -314,21 +316,23 @@ def do_edep_fit(data_vals, set_hist):
         #binned_data[bin_id-1] += data_dist[i]	# Raw data
         binned_data[bin_id-1] += 1		# Histogram
  
-    my_muons = Muons(set_hist["n_bins"]*2)
+    my_muons = Muons(400)
 
-    popt, pcov = optimize.curve_fit(get_mc_edep_prediction(data_bin_centers, binned_data, my_muons), data_bin_centers, binned_data, p0=[0.16, 945, 0.01], bounds=((0.0, 0.0, 0.0),(np.inf, 1e5, 1.0)))
+    popt, pcov = optimize.curve_fit(get_mc_edep_prediction(data_bin_centers, binned_data, my_muons), data_bin_centers, binned_data, p0=[yscale, escale, resscale], bounds=((0.0, 0.0, 0.0),(np.inf, 1e5, 1.0)))
 
     # Apply the fitted values to the function so we can graph it
     test_popt = np.insert(popt, 0, 0)
     closure_func = get_mc_edep_prediction(data_bin_centers, binned_data, my_muons)
     test = closure_func(*test_popt)
 
+    test_chi2 = edep_chi2(binned_data, conv_data = test)
+
     gbf = ROOT.TGraph()
 
     for i, (x,v) in enumerate(zip(data_bin_centers, test)):
         gbf.SetPoint(i, x, v)
 
-    return popt, pcov, gbf
+    return popt, pcov, gbf, test_chi2
 
 def do_michel_fit(hist, full_errors=False):
     # Fit the given histogram with a Michel energy spectrum for the energy scale

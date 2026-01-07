@@ -293,7 +293,7 @@ if __name__ == "__main__":
         flux_hist.Fill(flux)
 
     # Fit the data for y-axis scaling (unused), flux to MeV energy scaling, and energy resolution scaling factor
-    flux_fit_vals, flux_errors, flux_fit_graph = fit.do_edep_fit(flux_list, set_hist)
+    flux_fit_vals, flux_errors, flux_fit_graph, flux_fit_chi2 = fit.do_edep_fit(flux_list, set_hist)
 
     conv = flux_fit_vals[1]
     conv_err = np.sqrt(flux_errors[1][1])
@@ -326,7 +326,7 @@ if __name__ == "__main__":
         if(E <MICHEL_ENDPOINT_ENERGY and E>MICHEL_EMIN_CUT):
             pos_hist.Fill(rho_sqrd/R_PMT**2, z/1000.)
         if E<MICHEL_EMAX_CUT and E > MICHEL_EMIN_CUT and z < FV_Z_MAX and z > FV_Z_MIN and R < FV_R_MAX:
-            time_flux_hist.Fill(energy_tree.run, energy_tree.flux)
+            time_e_hist.Fill(energy_tree.run, energy_tree.flux)
             delt_hist.Fill(energy_tree.delt)
             fid_list.append(E)
      
@@ -349,9 +349,11 @@ if __name__ == "__main__":
         output_run = None
         output_run_name = output_type
         output_subrun = None
-        # Make output directory for that version ID
         newDir = OUTPUT_PATH+str(versionID)
-        os.makedirs(newDir) 
+        # Check if there is already a directory for this version ID
+        if not os.path.isdir(newDir) :
+            # Make output directory for this version ID
+            os.makedirs(newDir) 
         outFile = ROOT.TFile(newDir+"/fluxCorr_combined.root", "RECREATE")
     elif (RUN_TYPE==1) :
         # Looking on per-run basis
@@ -384,6 +386,12 @@ if __name__ == "__main__":
     else:
         with open(os.path.abspath(JSON_NAME), "w") as jfile:
             json.dump(version_update, jfile, indent=4)
+
+    # Write the fit's chi^2 to a json file
+    chi_f = open(OUTPUT_PATH+str(versionID)+"/chi2_"+str(versionID)+".json", 'a')
+    chi_dump = {"run":int(data[0]['run']), "chi":flux_fit_chi2}
+    json.dump(chi_dump, chi_f, indent=4)
+    chi_f.close()
 
     outFile.cd()
     c0 = ROOT.TCanvas("MC Conv")

@@ -42,29 +42,33 @@ def gaussian(x,mu=0.0,sigma=1.0):
     return np.exp(-0.5*((x-mu)/sigma)**2)/(sigma*np.sqrt(2*np.pi))
 
 def get_trend_line_simple(points):
-    """ Input argument points should be a (N, 3) array where the columns are
-        x, y, and error values. """
+    """ Input argument points should be a (N, 4) array where the columns are
+        run#, x, y, and error values. """
     sigma = TREND_WIDTH
-    xax = np.linspace(np.min(points[:,0]), np.max(points[:, 0]), 1000)
+    xax = np.linspace(np.min(points[:,1]), np.max(points[:, 1]), 10*len(points))
+    run_list = [run for run in points[:,0] for _ in range(10)]
+
     peak_val = gaussian(0,0,sigma=sigma)
-    results = np.zeros((len(xax), 3))
+    results = np.zeros((len(xax), 4))
     results[:, 0] = xax
 
-    point_err_weight = 1.0/points[:, 2]**2
+    point_err_weight = 1.0/points[:, 3]**2
     # If there are large periods of time between runs, the time_weight will be nonsense
     # So we will calculate the trend line for each seperate run period
-    time_weights = np.array([gaussian(points[:,0], mu=x0, sigma=sigma) for x0 in xax])
+    time_weights = np.array([gaussian(points[:, 1], mu=x0, sigma=sigma) for x0 in xax])
 
-    mean_vals = np.array([np.average(points[:, 1], weights=w*point_err_weight) for w in time_weights])
+    mean_vals = np.array([np.average(points[:, 2], weights=w*point_err_weight) for w in time_weights])
     results[:, 1] = mean_vals
 
-    variance = np.array([np.average((points[:,1]-mean)**2,weights=w*point_err_weight)  for w, mean in zip(time_weights,mean_vals)])
+    variance = np.array([np.average((points[:,2]-mean)**2,weights=w*point_err_weight)  for w, mean in zip(time_weights,mean_vals)])
     std_dev = np.sqrt(variance)
 
     weighted_counts = time_weights/peak_val
     counts = np.sum(weighted_counts, axis=1)
     mean_err = std_dev/np.sqrt(counts)
     results[:, 2] = mean_err
+
+    results[:, 3] = run_list
     return results
 
 def get_trend_line(points):
@@ -291,12 +295,14 @@ if __name__ == "__main__":
     eric_comp_h = ROOT.TH1D("Fraction of Eric's Data","Fraction of Eric's Data",500,-1,2)
     dodo_comp_h = ROOT.TH1D("Fraction of Dodo's Data","Fractio of Dodo's Data",500,-1,2)
     hk_comp_h = ROOT.TH1D("Fraction of HK's Data","Fraction of HK'd Data",500,-1,2)
-    comp_h = ROOT.TH1D("Fraction of Version %s's Data" % (compareID),"Fraction of Version %s's Data" % (compareID),500,-1,2)
+    if args.compare:
+        comp_h = ROOT.TH1D("Fraction of Version %s's Data" % (compareID),"Fraction of Version %s's Data" % (compareID),500,-1,2)
 
     # Histograms for comparing the current version's error with our other data sets
     eric_comp_err_h = ROOT.TH1D("Difference with Eric's Data","Fraction of Eric's Data",500,-100,100)
     hk_comp_err_h = ROOT.TH1D("Difference with HK's Data","Fraction of HK'd Data",500,-100,100)
-    comp_err_h = ROOT.TH1D("Difference with Version %s's Data" % (compareID),"Fraction of Version %s's Data" % (compareID),500,-100,100)
+    if args.compare:
+        comp_err_h = ROOT.TH1D("Difference with Version %s's Data" % (compareID),"Fraction of Version %s's Data" % (compareID),500,-100,100)
 
     # Get numerical comparison between the different corrections
     # HyoungKu, Dodo, and Eric's data uses a michel endpoint = 52.8 MeV
@@ -423,11 +429,15 @@ if __name__ == "__main__":
     comp_h.Write()
 
     eric_comp_err_h.Write()
-    dodo_comp_err_h.Write()
+    #dodo_comp_err_h.Write()
     hk_comp_err_h.Write()
     comp_err_h.Write()
 
     # Get the trend line of current version correction data for each period
+    # We will write the trend line values to the json file
+    with open(os.path.abspath(JSONFILE), "r") as jfile:
+        json_data = json.load(jfile)
+
     gtrend_indiv = []
     gtrend_all = []
     gtrend_abs = []
@@ -436,10 +446,14 @@ if __name__ == "__main__":
         gtrend_all.append(ROOT.TGraphErrors())
         gtrend_abs.append(ROOT.TGraphErrors())
 
-        trend = get_trend_line_simple(p_v[:, 1:4])
-        for i, (x, y, err) in enumerate(trend):
+        trend = get_trend_line_simple(p_v[:, 0:4])
+        for i, (x, y, err, run) in enumerate(trend):
             gtrend_abs[p_i].SetPoint(i,x,y)
             gtrend_abs[p_i].SetPointError(i,0,err)
+            # Write the trend line values to json file
+            if i%10==0:
+                json_data[str(versionID)]["run_"+str(int(run))].update({"TrendFlux2MeV": y, "TrendFlux2MeVErr": err, "RunPeriod": p_i})
+
             gtrend_indiv[p_i].SetPoint(i,x,y/nominal_flux2mev_dict[p_i][0])
             gtrend_indiv[p_i].SetPointError(i,0,err/nominal_flux2mev_dict[p_i][0])
             gtrend_all[p_i].SetPoint(i,x,y/nominal_flux2mev_dict['all'][0])
@@ -453,6 +467,8 @@ if __name__ == "__main__":
         gtrend_all[p_i].SetLineColor(ROOT.kViolet)
         gtrend_all[p_i].SetFillColorAlpha(ROOT.kViolet, ALPHA)
         gtrend_all[p_i].SetFillStyle(3001)
+    with open(os.path.abspath(JSONFILE), "w") as jfile:
+        json.dump(json_data, jfile, indent=4)
 
     # Plot the current version corrections flux to MeV and its trend line
     c1 = ROOT.TCanvas("%s F2MeV Absolute" % (versionID))
@@ -550,60 +566,60 @@ if __name__ == "__main__":
     c2_2.Update()
     c2_2.Write()
 
-    # Plot the normalized conversion with Dodo's results
-    c3 = ROOT.TCanvas("Dodo Compare 2021")
-    gdodo.SetMarkerColor(ROOT.kGreen)
-    gdodo.SetLineColor(ROOT.kGreen)
-        # Plot just the first run period which is shared between results
-    mg3 = ROOT.TMultiGraph()
-    mg3.Add(gdodo, "P*")
-    mg3.Add(gmine_indiv[0].Clone(), "P*")
-    #mg3.Add(gtrend_indiv[0].Clone(), "lineE3")
-    mg3.Draw('APE*')
-    mg3.GetXaxis().SetTimeDisplay(1)
-    mg3.GetXaxis().SetTimeFormat("%Y/%m/%d")
-    mg3.GetYaxis().SetTitle("Relative Flux per MeV")
-    leg3 = ROOT.TLegend(0.1, 0.66, 0.45, 0.9)
-    leg3.AddEntry(gdodo, "Dodo's measurement (normalized by first run)", "pe")
-    leg3.AddEntry(gmine_indiv[0], "New measurement, %s" % (versionID), "pe")
-    leg3.Draw('same')
-    c3.Update()
-    c3.Write()
-        # Plot all the run periods
-
-    dodo_vals = np.zeros((len(dodo_correction_forPlots), 3))
-    dodo_vals[:, :2] = np.array(sorted(dodo_correction_forPlots.items(), key=lambda x: x[0]))
-    dodo_vals[:, 2] = 0.001
-    dodo_trend = get_trend_line_simple(dodo_vals)
-    g_dodo_trend = ROOT.TGraphErrors()
-    for i, (x, y, err), in enumerate(dodo_trend):
-        g_dodo_trend.SetPoint(i,x,y)
-        g_dodo_trend.SetPointError(i,0,err)
-    g_dodo_trend.SetLineColor(ROOT.kGreen)
-    g_dodo_trend.SetFillColorAlpha(ROOT.kGreen, ALPHA)
-    g_dodo_trend.SetFillStyle(3001)
-    
-    c4 = ROOT.TCanvas("Dodo Compare All Runs (Nominal Flux-to-MeV Per Run)")
-    mg4 = ROOT.TMultiGraph()
-    for p_i in vals_per_period:
-        mg4.Add(gmine_indiv[p_i].Clone(), "P*")
-        mg4.Add(gtrend_indiv[p_i].Clone(), "lineE3")
-        mg4.Add(gnominal_indiv[p_i].Clone(), "lineE3")
-    mg4.Add(g_dodo_trend, "lineE3")
-    mg4.Add(gdodo.Clone(), "P*")
-
-    mg4.Draw("A")
-    mg4.GetYaxis().SetTitle("Relative Flux per MeV")
-    mg4.GetXaxis().SetTimeDisplay(1);
-    mg4.GetXaxis().SetTimeFormat("%Y/%m/%d")
-    leg4 = ROOT.TLegend(0.1, 0.66, 0.45, 0.9)
-    leg4.AddEntry(gdodo, "Dodo's measurement (normalized by first run)", "pe")
-    leg4.AddEntry(gmine_indiv[0], "New measurement, %s" % (versionID), "pe")
-    for p_i in vals_per_period:
-        leg4.AddEntry(gnominal_indiv[p_i], "Flux-to-MeV (Period %s) = %0.3f #pm %0.3f" % (p_i, nominal_flux2mev_dict[p_i][0], nominal_flux2mev_dict[p_i][1]),  "f")
-    leg4.Draw('same')
-    c4.Update()
-    c4.Write()
+#    # Plot the normalized conversion with Dodo's results
+#    c3 = ROOT.TCanvas("Dodo Compare 2021")
+#    gdodo.SetMarkerColor(ROOT.kGreen)
+#    gdodo.SetLineColor(ROOT.kGreen)
+#        # Plot just the first run period which is shared between results
+#    mg3 = ROOT.TMultiGraph()
+#    mg3.Add(gdodo, "P*")
+#    mg3.Add(gmine_indiv[0].Clone(), "P*")
+#    #mg3.Add(gtrend_indiv[0].Clone(), "lineE3")
+#    mg3.Draw('APE*')
+#    mg3.GetXaxis().SetTimeDisplay(1)
+#    mg3.GetXaxis().SetTimeFormat("%Y/%m/%d")
+#    mg3.GetYaxis().SetTitle("Relative Flux per MeV")
+#    leg3 = ROOT.TLegend(0.1, 0.66, 0.45, 0.9)
+#    leg3.AddEntry(gdodo, "Dodo's measurement (normalized by first run)", "pe")
+#    leg3.AddEntry(gmine_indiv[0], "New measurement, %s" % (versionID), "pe")
+#    leg3.Draw('same')
+#    c3.Update()
+#    c3.Write()
+#        # Plot all the run periods
+#
+#    dodo_vals = np.zeros((len(dodo_correction_forPlots), 3))
+#    dodo_vals[:, :2] = np.array(sorted(dodo_correction_forPlots.items(), key=lambda x: x[0]))
+#    dodo_vals[:, 2] = 0.001
+#    dodo_trend = get_trend_line_simple(dodo_vals)
+#    g_dodo_trend = ROOT.TGraphErrors()
+#    for i, (x, y, err), in enumerate(dodo_trend):
+#        g_dodo_trend.SetPoint(i,x,y)
+#        g_dodo_trend.SetPointError(i,0,err)
+#    g_dodo_trend.SetLineColor(ROOT.kGreen)
+#    g_dodo_trend.SetFillColorAlpha(ROOT.kGreen, ALPHA)
+#    g_dodo_trend.SetFillStyle(3001)
+#    
+#    c4 = ROOT.TCanvas("Dodo Compare All Runs (Nominal Flux-to-MeV Per Run)")
+#    mg4 = ROOT.TMultiGraph()
+#    for p_i in vals_per_period:
+#        mg4.Add(gmine_indiv[p_i].Clone(), "P*")
+#        mg4.Add(gtrend_indiv[p_i].Clone(), "lineE3")
+#        mg4.Add(gnominal_indiv[p_i].Clone(), "lineE3")
+#    mg4.Add(g_dodo_trend, "lineE3")
+#    mg4.Add(gdodo.Clone(), "P*")
+#
+#    mg4.Draw("A")
+#    mg4.GetYaxis().SetTitle("Relative Flux per MeV")
+#    mg4.GetXaxis().SetTimeDisplay(1);
+#    mg4.GetXaxis().SetTimeFormat("%Y/%m/%d")
+#    leg4 = ROOT.TLegend(0.1, 0.66, 0.45, 0.9)
+#    leg4.AddEntry(gdodo, "Dodo's measurement (normalized by first run)", "pe")
+#    leg4.AddEntry(gmine_indiv[0], "New measurement, %s" % (versionID), "pe")
+#    for p_i in vals_per_period:
+#        leg4.AddEntry(gnominal_indiv[p_i], "Flux-to-MeV (Period %s) = %0.3f #pm %0.3f" % (p_i, nominal_flux2mev_dict[p_i][0], nominal_flux2mev_dict[p_i][1]),  "f")
+#    leg4.Draw('same')
+#    c4.Update()
+#    c4.Write()
 
 #    c5 = ROOT.TCanvas()
 #    temp_vals = vals[:, 1:4]
@@ -692,6 +708,7 @@ if __name__ == "__main__":
 
     # Compare to Eric's data
         # Plot just the first run period which is shared between results
+    eric_data = np.array(eric_data)
     eric_trend = get_trend_line_simple(eric_data[:, 1:4])
     geric_trend = ROOT.TGraphErrors()
     for i, (x, y, err), in enumerate(eric_trend):
