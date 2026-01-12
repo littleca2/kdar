@@ -1,6 +1,9 @@
 
 This describes the workflow for getting michel electron information from JSNS2 data.
-Using the michel electron's energy spectrum, we calibrate against a monte carlo simulation to find the flux to Mev ratio.
+Using the michel electron's energy spectrum, we calibrate against a monte carlo simulation 
+to find the flux to Mev ratio.
+
+
 
 Begin with pre-processed run data (e.g. /mnt/braxton/KDAR_JADE_v3/preprod/)
 
@@ -60,5 +63,12 @@ python plot_time_flux.py version --michelEndpoint Eep (For version) --compare co
  * It compares to ~2021 energy correction values from HyoungKu, Dodo, and Eric. 
  * NOTE: Dodo's normalization/errors may not be totally accurate with respect to how it calculates the rest of the data.
  * The output is saved in the same place as get_data_params.py (/output_fluxCorr/${version})
+
+
+=======================================================
+(./MC)
+
+
+
 
 

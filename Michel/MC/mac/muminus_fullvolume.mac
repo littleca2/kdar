@@ -1,7 +1,6 @@
 # kdar_muminus_fullvolume.mac - 
 # mu- with energy spanning ** are spawned throughout the full detector volume
 #
-# Author: Cassandra Little
 
 #-----------------------------------------------
 #/control/macroPath /home/littleca/kdar/MichelAnalysis/mac/muminus_fullvolume.mac

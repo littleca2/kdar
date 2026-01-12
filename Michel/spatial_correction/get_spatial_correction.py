@@ -51,7 +51,6 @@ if __name__ == "__main__":
     Z_FV_LOW = -1000
     Z_FV_HIGH = 1000
 
-
     # Energy histogram binning
     min_E = 20
     max_E = 70
@@ -105,13 +104,15 @@ if __name__ == "__main__":
         location_data_hist.append(fit.PositionBasedHistograms("Data", "", 12, 0, 2.56e6, 10, -1.25e3, 1.25e3, n_bin, min_E, max_E))
         E_data_hist.append(ROOT.TH1D("energy_inner_data", "", n_bin, min_E, max_E))
 
+    # Get events only in the detectors inner volume
     for i, (x,y,z,p) in enumerate(data[:, :4]):
         if np.sqrt(x**2 + y**2) < R_FV and Z_FV_LOW < z < Z_FV_HIGH :
             E = data[i, 5]
-            inner_E_data[int(p)].append(E)
+            if E > 20.0 : 
+                inner_E_data[int(p)].append(E)
 
-            location_data_hist[int(p)].Fill(x**2+y**2, z, E)
-            E_data_hist[int(p)].Fill(E)
+                location_data_hist[int(p)].Fill(x**2+y**2, z, E)
+                E_data_hist[int(p)].Fill(E)
 
     # Fit the MeV converted data for all the runs
     set_hist = {"n_bins": n_bin, "min": min_E, "max": max_E}
@@ -141,40 +142,40 @@ if __name__ == "__main__":
 
     # Read in MC data
     MC_file = ROOT.TFile(mc_filename, "READ")
-    MC_tree = MC_file["energy_tree"]
-    x_MC, y_MC, z_MC, flux_MC, ptype_MC = zip(*[[evt.x, evt.y, evt.z, evt.flux, evt.PDG] for evt in MC_tree])
+    MC_tree = MC_file["total_tree"]
+    #MC_tree = MC_file["michel_tree"]
+    flux_MC, Edep_MC, x_MC, y_MC, z_MC = zip(*[[evt.f, evt.edep, evt.x, evt.y, evt.z] for evt in MC_tree])
     MC_file.Close()
     print("MC data loaded")
 
-    # Calculate the MC weights for the mu-plus and mu-minus proportion
-    plus_count = len([x for x in ptype_MC if x==13])
-    minus_count = len([x for x in ptype_MC if x==-13])
-    plus_weight = float(plus_count)/(plus_count + minus_count)
-    minus_weight = float(minus_count)/(plus_count + minus_count)
-    # Ratio mu+/mu- = 1.21 from PRD 74.082006
-    plus_weight *= 1.21
-    minus_weight *= 1.
-
     # Calculate energy in MeV from flux
+    # TODO Should I try and do the volume cut here
+    MC_flux_fit_vals, MC_flux_errors, MC_flux_fit_graph, MC_flux_fit_chi2 = fit.do_edep_fit(flux_MC, set_hist)
 
-    ##### Perform Fit of the Inner Energy Hist for MC Data #####
-    inner_MC = [[E, (x, y, z), ptype] for E,x,y,z,ptype in zip(E_MC, x_MC, y_MC, z_MC, ptype_MC) if np.sqrt(x**2 + y**2) < R_FV and Z_FV_LOW < z < Z_FV_HIGH and E > 20.0]
+    MC_conv = MC_flux_fit_vals[1]
+    MC_conv_err = np.sqrt(MC_flux_errors[1][1])
+    MC_res_scale = MC_flux_fit_vals[2]
+    MC_res_scale_err = np.sqrt(MC_flux_errors[2][2])
 
-    inner_pos_MC = [pos for E, pos, ptype in inner_MC]
-    # We need to apply the mu+/- weights to the list of event energies so the fit matches with the hist
-    # So we go ahead and bin the data according to our set_hist parameters
-    # and then "re-create" the now weighted data by representing it with a list of the 
-    # bin center values for each histogram entry.
-    inner_MC_arr = np.array([[E, ptype] for E, pos, ptype in inner_MC])
-    E_MC_bins = np.linspace(min_E, max_E, n_bin+1)
-    E_MC_bin_centers = np.linspace((min_E + bwidth/2), (max_E - bwidth/2), n_bin)
-    E_MC_nphist = np.histogram(inner_MC_arr[:,0], bins=E_MC_bins, weights=inner_MC_arr[:,1])[0]
-    inner_E_MC_weighted_centers = []
-    for binN, yval in enumerate(E_MC_nphist):
-        for count in range(int(yval)):
-            inner_E_MC_weighted_centers.append(E_MC_bin_centers[binN])
+    # Like with the real data, convert MC flux values to MeV using the conv we just found
+    E_MC = [ flux/float(MC_conv) for flux in flux_MC ]
 
-    MC_fit_vals, MC_fit_errors, MC_fit_graph, MC_fit_chi2 = fit.do_edep_fit(inner_E_MC_weighted_centers, set_hist, escale=1.0)
+    # Get the events in the detectors inner volume
+    location_mc_hist = fit.PositionBasedHistograms("MC", "", 12, 0, 2.56e6, 10, -1.25e3, 1.25e3, n_bin, min_E, max_E)
+    E_mc_hist = ROOT.TH1D("energy_inner_MC", "MC_Energy", n_bin, min_E, max_E)
+
+    inner_E_MC = []
+    inner_pos_MC = []
+    for E,x,y,z in zip(E_MC, x_MC, y_MC, z_MC):
+        if np.sqrt(x**2 + y**2) < R_FV and Z_FV_LOW < z < Z_FV_HIGH and E > 20.0:
+            inner_E_MC.append(E)
+            inner_pos_MC.append((x,y,z))
+
+            location_mc_hist.Fill(x**2+y**2, z, E)
+            E_mc_hist.Fill(E)
+
+    # Fit the MC inner energy
+    MC_fit_vals, MC_fit_errors, MC_fit_graph, MC_fit_chi2 = fit.do_edep_fit(inner_E_MC, set_hist, escale=1.0)
 
     scale_MC = MC_fit_vals[1]
     scale_MC_err = np.sqrt(MC_fit_errors[1][1])
@@ -183,13 +184,6 @@ if __name__ == "__main__":
 
     print("\nInner Fit E MC Scale %0.5f ± %0.5f" % (scale_MC, scale_MC_err))
     print("Inner Fit E MC Resolution %0.5f ± %0.5f" % (res_MC, res_MC_err))
-
-    # Fill the MC events position based histograms
-    location_mc_hist = fit.PositionBasedHistograms("MC", "", 12, 0, 2.56e6, 10, -1.25e3, 1.25e3, n_bin, min_E, max_E)
-    E_mc_hist = ROOT.TH1D("energy_inner_MC", "MC_Energy", n_bin, min_E, max_E)
-
-    [location_mc_hist.Fill(x**2+y**2, z, E) for E, (x, y, z), ptype in inner_MC]
-    [E_mc_hist.Fill(E, plus_weight if ptype==13 else minus_weight) for E, pos, ptype in inner_MC]
 
     # Compare data and MC energy scales
     scale_ratio = []
@@ -232,15 +226,32 @@ if __name__ == "__main__":
         print("Average scale factor: "+str(np.average(corr_avg)))
 
     # Create smeared MC data and fit it
-    #bin_centers = (np.linspace(min_E, max_E, n_bin) + (max_E-min_E)/(2*n_bin))[:-1]
+    bin_centers = (np.linspace(min_E, max_E, n_bin) + (max_E-min_E)/(2*n_bin))[:-1]
     #sigma_smear = delta_sigma(E, res_data, res_MC)
     res_data_avg = np.average(res_data)
     sigma_smear = np.sqrt(res_data_avg**2 - res_MC**2)
-    smeared_MC = fit.apply_smearing(E_MC_nphist, E_MC_bin_centers, sigma_smear, 0)
+    # Bin the data
+    MC_bins = np.linspace(min_E, max_E, n_bin+1)
+    MC_bin_idx = np.digitize(inner_E_MC, MC_bins)
+    binned_MC = np.zeros(len(MC_bins)-1)
+    for i, bin_id in enumerate(MC_bin_idx):
+        if bin_id == 0 or bin_id == len(MC_bins):
+            continue
+        binned_MC[bin_id-1] += 1
+
+    smeared_MC = fit.apply_smearing(binned_MC, bin_centers, sigma_smear, 0)
 
     E_mc_g_s = ROOT.TGraph()
-    for i, (x,y) in enumerate(zip(E_MC_bin_centers, smeared_MC)):
-        E_mc_g_s.SetPoints(i, x, y)
+    for i, (x,y) in enumerate(zip(bin_centers, smeared_MC)):
+        E_mc_g_s.SetPoint(i, x, y)
+
+    E_mc_hist_s = ROOT.TH1D("smeared_MC", "smeared_MC", n_bin, min_E, max_E)
+    location_mc_hist_s = fit.PositionBasedHistograms("MC", "", 12, 0, 2.56e6, 10, -1.25e3, 1.25e3, n_bin, min_E, max_E)
+    print(len(smeared_MC),len(bin_centers))
+    for i, center in enumerate(bin_centers):
+        for yval in range(int(smeared_MC[i])):
+            E_mc_hist_s.Fill(center)
+            location_mc_hist_s.Fill(x**2+y**2, z, E)
 
     #E_mc_hist_s = ROOT.TH1D("smeared_MC", "smeared_MC", n_bin, min_E, max_E)
     #[E_mc_hist_s.Fill(E) for E in smeared_MC]
@@ -251,6 +262,9 @@ if __name__ == "__main__":
     scale_MC_err_s = np.sqrt(MC_fit_err_s[1][1])
     res_MC_s = MC_fit_vals_s[2]
     res_MC_err_s = np.sqrt(MC_fit_err_s[2][2])
+
+    print("\nInner Fit E Smeared MC Scale %0.5f ± %0.5f" % (scale_MC_S, scale_MC_err_s))
+    print("Inner Fit E Smeared MC Resolution %0.5f ± %0.5f" % (res_MC_s, res_MC_err_s))
 
     # Write to outfile
     outFile = ROOT.TFile(output_filename, "RECREATE")
@@ -306,25 +320,26 @@ if __name__ == "__main__":
         c1[period].Write()
 
     c2 = ROOT.TCanvas("Inner Michel Reco E: Smeared MC")
-    #E_mc_hist_s.SetTitle("Smeared MC")
-    #E_mc_hist_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
-    #E_mc_hist_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
-    #E_mc_hist_s.SetStats(0)
-    #E_mc_hist_s.SetLineColor(ROOT.kBlue)
-    #E_mc_hist_s.SetLineWidth(2)
-    #E_mc_hist_s.Draw("HISTE")
-    E_mc_g_s.SetTitle("Smeared MC")
-    E_mc_g_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
-    E_mc_g_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
-    E_mc_g_s.SetStats(0)
-    E_mc_g_s.SetLineColor(ROOT.kBlue)
-    E_mc_g_s.SetLineWidth(2)
-    E_mc_g_s.Draw("AP")
+    E_mc_hist_s.SetTitle("Smeared MC")
+    E_mc_hist_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
+    E_mc_hist_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
+    E_mc_hist_s.SetStats(0)
+    E_mc_hist_s.SetLineColor(ROOT.kBlue)
+    E_mc_hist_s.SetLineWidth(2)
+    E_mc_hist_s.Draw("HISTE")
+#    E_mc_g_s.SetTitle("Smeared MC")
+#    E_mc_g_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
+#    E_mc_g_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
+#    E_mc_g_s.SetStats(0)
+#    E_mc_g_s.SetLineColor(ROOT.kBlue)
+#    E_mc_g_s.SetLineWidth(2)
+#    E_mc_g_s.Draw("AP")
     MC_fit_graph_s.SetLineColor(2)
     MC_fit_graph_s.SetLineWidth(2)
     MC_fit_graph_s.Draw("Same")
     leg2 = ROOT.TLegend(0.60, 0.65, 0.88, 0.86)
     leg2.AddEntry(E_mc_hist_s, "Smeared MC", "l")
+    #leg2.AddEntry(E_mc_g_s, "Smeared MC", "l")
     leg2.AddEntry(MC_fit_graph_s, "Michel Fit", "l")
     leg2.AddEntry("", "Scale: %0.5f #pm %0.5f" % (scale_MC_s, scale_MC_err_s), "")
     leg2.AddEntry("", "Ep Res: %0.5f%% #pm %0.5f" % (res_MC_s, res_MC_err_s), "")
@@ -339,6 +354,7 @@ if __name__ == "__main__":
     norm_MC.Scale(1.0/norm_MC.Integral())
 
     norm_smear = E_mc_hist_s.Clone("norm_smear")
+    #norm_smear = E_mc_g_s.Clone("norm_smear")
     norm_smear.SetLineColor(ROOT.kGreen+1)
     norm_smear.Scale(1.0/norm_smear.Integral())
 
@@ -347,6 +363,7 @@ if __name__ == "__main__":
 
         norm_MC.Draw("HIST")
         norm_smear.Draw("HIST Same")
+        #norm_smear.Draw("Same")
 
         norm_data = E_data_hist[period].Clone("norm_data")
         norm_data.SetLineColor(1)
