@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy import optimize
 from scipy.optimize import curve_fit
 import math
+from collections import defaultdict
 
 MICHEL_E_ENDPOINT = 53.3
 
@@ -386,8 +387,13 @@ class PositionBasedHistograms():
         self.hists = [ROOT.TH1D(name+"_h1_%i"%idx if name else "", "%s;R^{2} [mm^{2}];Z [mm]" % title, nz, zlow, zhigh) for idx in range(nx*ny)]
         self.nx = nx
         self.ny = ny
+        self.nz = nz
+        self.zlow = zlow
+        self.zhigh = zhigh
         self.lines = []
         self.graphs = []
+        self.energies = defaultdict(list)
+        self.set_hist = {"n_bins": self.nz, "min": self.zlow, "max": self.zhigh}
     def Fill(self, x, y, z, weight=None):
         xbin = self.h2.GetXaxis().FindBin(x) - 1
         ybin = self.h2.GetYaxis().FindBin(y) - 1
@@ -395,8 +401,10 @@ class PositionBasedHistograms():
             return
         if weight is  None:
             self.hists[ybin*self.nx + xbin].Fill(z)
+            self.energies[ybin*self.nx + xbin].append(z)
         else:
             self.hists[ybin*self.nx + xbin].Fill(z, weight)
+            print("Cannot apply weights to PositionBasedHistogram energies")
 
     def Draw(self, canvas, fitf=None):
         #canvas.cd()
@@ -433,37 +441,33 @@ class PositionBasedHistograms():
         canvas.Update()
 
     def Fit(self):
-        self.fit_vals = [do_michel_fit_conv(h) if h.GetEntries() >0 else None for h in self.hists]
-        #self.fit_vals = [mc_michel.do_fit(h) for h in self.hists]
-
-        # I want all the energy scale values relative to particular bin
-        #scale_benchark = self.fit_vals[12*5 + 0][0][2];
-        scale_benchark = MICHEL_E_ENDPOINT
-
+        self.edep_fit_vals = defaultdict(list)
+        self.edep_fit_errs = defaultdict(list)
+        for idx, e in self.energies.items():
+            if len(e) > 0:
+                val, val_err, val_graph, val_chi2 = do_edep_fit(e, self.set_hist, escale=1.0)
+                self.edep_fit_vals[idx] = val
+                self.edep_fit_errs[idx] = val_err
+                #print(idx)
+            else:
+                self.edep_fit_vals[idx] = None
+                self.edep_fit_errs[idx] = None
+        #print("----")
         for ix in range(self.nx):
             for iy in range(self.ny):
-                hist_idx = (iy+1)*self.nx + (ix+1)
-                arr_idx = iy*self.nx + ix
-
-                if(self.fit_vals[arr_idx] is None):
+                arr_idx = int(iy*self.nx + ix)
+                print(arr_idx)
+                if arr_idx not in self.edep_fit_vals.keys():
                     continue
-                # The energy scale is reported by the fitter in weird way where
-                # if energy scale is low, the value reported is high.
-                # So take the inverse of the value so it becomes more sensible,
-                # and then propagate that change to the error too
-                scale_val = self.fit_vals[arr_idx][0][2]
-                fractional_scale_err = self.fit_vals[arr_idx][1][2]/scale_val
-                #scale_val = 1.0/scale_val
-                scale_val /= scale_benchark;
-                scale_err = fractional_scale_err*scale_val
-                self.scale_h2.SetBinContent(ix+1, iy+1, scale_val)
-                self.scale_h2.SetBinError(ix+1, iy+1, scale_err)
 
-                self.resolution_h2.SetBinContent(ix+1, iy+1, self.fit_vals[arr_idx][0][0])
-                self.resolution_h2.SetBinError(ix+1, iy+1, self.fit_vals[arr_idx][1][0])
+                self.scale_h2.SetBinContent(ix+1, iy+1, self.edep_fit_vals[arr_idx][1])
+                self.scale_h2.SetBinError(ix+1, iy+1, self.edep_fit_errs[arr_idx][1][1])
+
+                self.resolution_h2.SetBinContent(ix+1, iy+1, self.edep_fit_vals[arr_idx][2])
+                self.resolution_h2.SetBinError(ix+1, iy+1, self.edep_fit_errs[arr_idx][2][2])
 
     def DrawFit(self, c1, c2):
-        if not self.fit_vals:
+        if not self.edep_fit_vals:
             print("Fit values not available!")
             return
         ll1 = ROOT.TLine(0, 1e3, 1.4e3**2, 1e3)
@@ -480,3 +484,46 @@ class PositionBasedHistograms():
         self.resolution_h2.SetStats(0)
         self.resolution_h2.Draw("colztextE")
         [ll.Draw("same") for ll in [ll1, ll2, ll3]]
+
+    def SmearFit(self, sigma):
+        self.edep_fit_vals_s = defaultdict(list)
+        self.edep_fit_errs_s = defaultdict(list)
+        for idx, e in self.energies.items():
+            if len(e) > 0:
+                bin_centers = (np.linspace(self.zlow, self.zhigh, self.nz) + (self.zhigh-self.zlow)/(2*self.nz))[:-1]
+                bins = np.linspace(self.zlow, self.zhigh, self.nz+1)
+                bin_idx = np.digitize(e, bins)
+                binned_e = np.zeros(len(e)-1)
+                for i, bin_id in enumerate(bin_idx):
+                    if bin_id == 0 or bin_id == len(bins):
+                        continue
+                    binned_e[bin_id-1] += 1
+
+                smeared_bin_data = apply_smearing(binned_e, bin_centers, sigma, 0)
+
+                # "Un-bin" the data so we can fit it 
+                smeared_unbin_data = []
+                for i, center in enumerate(bin_centers):
+                    for yval in range(int(smeared_bin_data[i])):
+                        smeared_unbin_data.append(center)
+
+                val_s, val_err_s, val_graph_s, val_chi2_s = do_edep_fit(smeared_unbin_data, self.set_hist, escale=1.0)
+                self.edep_fit_vals_s[idx] = val_s
+                self.edep_fit_errs_s[idx] = val_err_s
+            else:
+                self.edep_fit_vals_s[idx] = None
+                self.edep_fit_errs_s[idx] = None
+                
+        for ix in range(self.nx):
+            for iy in range(self.ny):
+                arr_idx = iy*self.nx + ix
+                
+                if len(self.edep_fit_vals_s[arr_idx])==0 or (self.edep_fit_vals_s[arr_idx] is None):
+                    continue
+
+                self.scale_h2.SetBinContent(ix+1, iy+1, self.edep_fit_vals_s[arr_idx][1])
+                self.scale_h2.SetBinError(ix+1, iy+1, self.edep_fit_errs_s[arr_idx][1][1])
+
+                self.resolution_h2.SetBinContent(ix+1, iy+1, self.edep_fit_vals_s[arr_idx][2])
+                self.resolution_h2.SetBinError(ix+1, iy+1, self.edep_fit_errs_s[arr_idx][2][2])
+

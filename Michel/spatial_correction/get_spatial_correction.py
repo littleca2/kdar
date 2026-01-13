@@ -76,6 +76,7 @@ if __name__ == "__main__":
     for evt in data_file["event_tree"]:
         if evt.run != prev_run:
             prev_run = evt.run
+
             try:
                 period = data_json_vals["run_"+str(int(evt.run))]["RunPeriod"]
                 no_period = 0
@@ -140,6 +141,8 @@ if __name__ == "__main__":
     res_data = np.array(res_data)
     res_data_err = np.array(res_data_err)
 
+    # Get scale and resolution for each area divided in the detector
+
     # Read in MC data
     MC_file = ROOT.TFile(mc_filename, "READ")
     MC_tree = MC_file["total_tree"]
@@ -185,6 +188,44 @@ if __name__ == "__main__":
     print("\nInner Fit E MC Scale %0.5f ± %0.5f" % (scale_MC, scale_MC_err))
     print("Inner Fit E MC Resolution %0.5f ± %0.5f" % (res_MC, res_MC_err))
 
+    # Create smeared MC data and fit it
+    #sigma_smear = delta_sigma(E, res_data, res_MC)
+    res_data_avg = np.average(res_data)
+    sigma_smear = np.sqrt(res_data_avg**2 - res_MC**2)
+
+    # Bin the data
+    bin_centers = (np.linspace(min_E, max_E, n_bin) + (max_E-min_E)/(2*n_bin))[:-1]
+    MC_bins = np.linspace(min_E, max_E, n_bin+1)
+    MC_bin_idx = np.digitize(inner_E_MC, MC_bins)
+    binned_MC = np.zeros(len(MC_bins)-1)
+    for i, bin_id in enumerate(MC_bin_idx):
+        if bin_id == 0 or bin_id == len(MC_bins):
+            continue
+        binned_MC[bin_id-1] += 1
+
+    smeared_MC = fit.apply_smearing(binned_MC, bin_centers, sigma_smear, 0)
+
+    E_mc_g_s = ROOT.TGraph()
+    for i, (x,y) in enumerate(zip(bin_centers, smeared_MC)):
+        E_mc_g_s.SetPoint(i, x, y)
+
+    E_mc_hist_s = ROOT.TH1D("energy_inner_MC_smeared", "Smeared_MC_Energy", n_bin, min_E, max_E)
+    smeared_MC_data = []
+    for i, center in enumerate(bin_centers):
+        for yval in range(int(smeared_MC[i])):
+            E_mc_hist_s.Fill(center)
+            smeared_MC_data.append(center)
+
+    MC_fit_vals_s, MC_fit_err_s, MC_fit_graph_s, MC_fit_chi2_s = fit.do_edep_fit(smeared_MC_data, set_hist, escale=1.0)
+
+    scale_MC_s = MC_fit_vals_s[1]
+    scale_MC_err_s = np.sqrt(MC_fit_err_s[1][1])
+    res_MC_s = MC_fit_vals_s[2]
+    res_MC_err_s = np.sqrt(MC_fit_err_s[2][2])
+
+    print("\nInner Fit E Smeared MC Scale %0.5f ± %0.5f" % (scale_MC_s, scale_MC_err_s))
+    print("Inner Fit E Smeared MC Resolution %0.5f ± %0.5f" % (res_MC_s, res_MC_err_s))
+   
     # Compare data and MC energy scales
     scale_ratio = []
     scale_ratio_err = []
@@ -225,50 +266,71 @@ if __name__ == "__main__":
 
         print("Average scale factor: "+str(np.average(corr_avg)))
 
-    # Create smeared MC data and fit it
-    bin_centers = (np.linspace(min_E, max_E, n_bin) + (max_E-min_E)/(2*n_bin))[:-1]
-    #sigma_smear = delta_sigma(E, res_data, res_MC)
-    res_data_avg = np.average(res_data)
-    sigma_smear = np.sqrt(res_data_avg**2 - res_MC**2)
-    # Bin the data
-    MC_bins = np.linspace(min_E, max_E, n_bin+1)
-    MC_bin_idx = np.digitize(inner_E_MC, MC_bins)
-    binned_MC = np.zeros(len(MC_bins)-1)
-    for i, bin_id in enumerate(MC_bin_idx):
-        if bin_id == 0 or bin_id == len(MC_bins):
-            continue
-        binned_MC[bin_id-1] += 1
-
-    smeared_MC = fit.apply_smearing(binned_MC, bin_centers, sigma_smear, 0)
-
-    E_mc_g_s = ROOT.TGraph()
-    for i, (x,y) in enumerate(zip(bin_centers, smeared_MC)):
-        E_mc_g_s.SetPoint(i, x, y)
-
-    E_mc_hist_s = ROOT.TH1D("smeared_MC", "smeared_MC", n_bin, min_E, max_E)
-    location_mc_hist_s = fit.PositionBasedHistograms("MC", "", 12, 0, 2.56e6, 10, -1.25e3, 1.25e3, n_bin, min_E, max_E)
-    print(len(smeared_MC),len(bin_centers))
-    for i, center in enumerate(bin_centers):
-        for yval in range(int(smeared_MC[i])):
-            E_mc_hist_s.Fill(center)
-            location_mc_hist_s.Fill(x**2+y**2, z, E)
-
-    #E_mc_hist_s = ROOT.TH1D("smeared_MC", "smeared_MC", n_bin, min_E, max_E)
-    #[E_mc_hist_s.Fill(E) for E in smeared_MC]
-
-    MC_fit_vals_s, MC_fit_err_s, MC_fit_graph_s, MC_fit_chi2_s = fit.do_edep_fit(smeared_MC, set_hist, escale=1.0)
-
-    scale_MC_s = MC_fit_vals_s[1]
-    scale_MC_err_s = np.sqrt(MC_fit_err_s[1][1])
-    res_MC_s = MC_fit_vals_s[2]
-    res_MC_err_s = np.sqrt(MC_fit_err_s[2][2])
-
-    print("\nInner Fit E Smeared MC Scale %0.5f ± %0.5f" % (scale_MC_S, scale_MC_err_s))
-    print("Inner Fit E Smeared MC Resolution %0.5f ± %0.5f" % (res_MC_s, res_MC_err_s))
-
-    # Write to outfile
+   # Write to outfile
     outFile = ROOT.TFile(output_filename, "RECREATE")
     outFile.cd()
+    c5_0 = ROOT.TCanvas("MC Fit Scale")
+    c5_1 = ROOT.TCanvas("MC Fit Resolution")
+    location_mc_hist.DrawFit(c5_0, c5_1)
+    c5_0.Update()
+    c5_1.Update()
+    c5_0.Draw()
+    c5_1.Draw()
+    c5_0.Write()
+    c5_1.Write()
+
+    # Compare data and smeared MC energy scales
+    scale_ratio_s = []
+    scale_ratio_err_s = []
+    for period in range(n_periods):
+        scale_ratio_s.append(scale_MC_s/scale_data[period])
+        scale_ratio_err_s.append(scale_ratio_s[period]*np.sqrt( (scale_MC_err_s/scale_MC_s)**2 + (scale_data_err[period]/scale_data[period])**2 ))
+
+        print("Run Period %i Scale ratio: %0.5f ± %0.5f" % (period, scale_ratio_s[period], scale_ratio_err_s[period]))
+
+    corr_h2_s = []
+    for period in range(n_periods):
+        location_mc_hist.SmearFit(sigma_smear)
+
+        loc_data_hist_nbinsX = location_data_hist[period].scale_h2.GetNbinsX()
+        loc_data_hist_nbinsY = location_data_hist[period].scale_h2.GetNbinsY()
+
+        data_scale = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
+        mc_scale = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
+        corr = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
+
+        corr_h2_s.append(ROOT.TH2D("mc_energy_scale_correction", "", 12, 0, 2.56e3, 10, -1.25e3, 1.25e3))
+        corr_avg_s = []
+
+        for i in range(loc_data_hist_nbinsX):
+            for j in range(loc_data_hist_nbinsY):
+                d = location_data_hist[period].scale_h2.GetBinContent(i+1, j+1)
+                mc = location_mc_hist.scale_h2.GetBinContent(i+1, j+1)
+                data_scale[i, j] = d
+                mc_scale[i, j] = mc
+                corr[i, j] = d/mc if mc !=0 else 1.0
+                corr_h2_s[period].SetBinContent(i+1, j+1, corr[i, j])
+
+                if mc != 0:
+                    corr_avg_s.append(d/mc)
+
+        corr_avg_s = np.array(corr_avg_s)
+
+        print("Average scale factor for smeared MC: "+str(np.average(corr_avg_s)))
+
+    # Write to outfile
+    #outFile = ROOT.TFile(output_filename, "RECREATE")
+    outFile.cd()
+
+    c5_2 = ROOT.TCanvas("Smeared MC Fit Scale")
+    c5_3 = ROOT.TCanvas("Smeared MC Fit Resolution")
+    location_mc_hist.DrawFit(c5_2, c5_3)
+    c5_2.Update()
+    c5_3.Update()
+    c5_2.Draw()
+    c5_3.Draw()
+    c5_2.Write()
+    c5_3.Write()
 
     ntuple_out = ROOT.TNtuple("energy_tree", "energy_tree", "E:x:y:z")
     [ntuple_out.Fill(E,x,y,z) for E, (x, y, z) in zip(smeared_MC, inner_pos_MC)]
@@ -279,6 +341,12 @@ if __name__ == "__main__":
         c6.append(ROOT.TCanvas("MC Energy Scale Correction wrt Run Period %i" % (period)))
         corr_h2[period].Draw("TEXT COLZ")
         c6[period].Write()
+
+    c7 = []
+    for period in range(n_periods):
+        c7.append(ROOT.TCanvas("Smeared MC Energy Scale Correction wrt Run Period %i" % (period)))
+        corr_h2_s[period].Draw("TEXT COLZ")
+        c7[period].Write()
 
     c0 = ROOT.TCanvas("Inner Michel Reco E: MC Data")
     E_mc_hist.SetTitle("MC")
@@ -342,7 +410,7 @@ if __name__ == "__main__":
     #leg2.AddEntry(E_mc_g_s, "Smeared MC", "l")
     leg2.AddEntry(MC_fit_graph_s, "Michel Fit", "l")
     leg2.AddEntry("", "Scale: %0.5f #pm %0.5f" % (scale_MC_s, scale_MC_err_s), "")
-    leg2.AddEntry("", "Ep Res: %0.5f%% #pm %0.5f" % (res_MC_s, res_MC_err_s), "")
+    leg2.AddEntry("", "Ep Res: %0.5f%% #pm %0.5f" % (res_MC_s*100, res_MC_err_s*100), "")
     leg2.Draw("Same")
     c2.Write()
     
@@ -388,10 +456,10 @@ if __name__ == "__main__":
         c4_0[period].Draw()
         c4_1[period].Draw()
     
-    c5_0 = ROOT.TCanvas("MC Fit Scale")
-    c5_1 = ROOT.TCanvas("MC Fit Resolution")
-    location_mc_hist.DrawFit(c5_0, c5_1)
-    c5_0.Update()
-    c5_1.Update()
-    c5_0.Draw()
-    c5_1.Draw()
+#    c5_0 = ROOT.TCanvas("MC Fit Scale")
+#    c5_1 = ROOT.TCanvas("MC Fit Resolution")
+#    location_mc_hist.DrawFit(c5_0, c5_1)
+#    c5_0.Update()
+#    c5_1.Update()
+#    c5_0.Draw()
+#    c5_1.Draw()
