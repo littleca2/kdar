@@ -10,23 +10,30 @@ import numpy as np
 total_flux_hist = ROOT.TH1D("total_flux", "total_flux", 100, 0, 45000)
 back_flux_hist = ROOT.TH1D("back_flux", "back_flux", 100, 0, 45000)
 michel_flux_hist = ROOT.TH1D("michel_flux", "michel_flux", 100, 0, 45000)
-total_tree = ROOT.TNtuple("total_tree", "total_tree", "f:edep:x:y:z:mc_x:mc_y:mc_z")
-michel_tree = ROOT.TNtuple("michel_tree", "michel_tree", "f:edep:x:y:z:mc_x:mc_y:mc_z")
+total_tree = ROOT.TNtuple("total_tree", "total_tree", "f:edep:x:y:z:mc_x:mc_y:mc_z:mu_weight")
+michel_tree = ROOT.TNtuple("michel_tree", "michel_tree", "f:edep:x:y:z:mc_x:mc_y:mc_z:mu_weight")
 back_tree = ROOT.TNtuple("back_tree", "back_tree", "f:edep:x:y:z:mc_x:mc_y:mc_z")
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Extract the michel event data from an input analysis tree")
-    parser.add_argument("input", type=str, help="input ROOT filename, can include wildcard to concatenate files")
+    parser.add_argument("input", type=str, help="input ROOT filename, combined pair_tree")
+    parser.add_argument("mu_weight_input", type=str, help="Mu weight input ROOT filename, combined friend file")
     parser.add_argument("output", type=str, help="output ROOT filename")
     args = parser.parse_args()
     input_filename = args.input
     output_filename = args.output
+    mu_filename = args.mu_weight_input
 
     pair_tree = ROOT.TChain("pair_tree")
     pair_tree.Add(input_filename)
 
+    weight_tree = ROOT.TChain("weight_tree")
+    weight_tree.Add(mu_filename)
+    pair_tree.AddFriend(weight_tree)
+
     for i in range(pair_tree.GetEntries()):
+        if i%10000==0: print(i)
         pair_tree.GetEntry(i)
         E_d = pair_tree.E_d_b
         E_dep = pair_tree.E_dep_b
@@ -47,7 +54,7 @@ if __name__ == "__main__":
         for f, x, y, z, trig in zip(flux_arr, x_arr, y_arr, z_arr, trig_arr):
             if trig >= 0:
                 total_flux_hist.Fill(f)
-                total_tree.Fill(f, E_dep, x, y, z, mc_x, mc_y, mc_z)
+                total_tree.Fill(f, E_dep, x, y, z, mc_x, mc_y, mc_z, weight_tree.mu_weight)
         if E_d == -1:
             # Not a michel
             for f, x, y, z, trig in zip(flux_arr, x_arr, y_arr, z_arr, trig_arr):
@@ -64,7 +71,7 @@ if __name__ == "__main__":
                 elif subtrig == 0 and t_z < 1500:
                     # A michel!
                     michel_flux_hist.Fill(f)
-                    michel_tree.Fill(f, E_dep, x, y, z, mc_x, mc_y, mc_z)
+                    michel_tree.Fill(f, E_dep, x, y, z, mc_x, mc_y, mc_z, weight_tree.mu_weight)
 
 
     C1 = ROOT.TCanvas("Michel Info")

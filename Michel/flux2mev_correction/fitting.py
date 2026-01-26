@@ -297,28 +297,31 @@ def edep_chi2(binned_data, conv_data=None, args=None, data_bin_centers=None, set
 
     numerator = (conv_data - binned_data)**2
     chi2 = abs(np.sum(np.divide(numerator, conv_data, out=np.zeros_like(numerator), where=conv_data!=0)))
-    print("chi2 = ", chi2)
+    #print("chi2 = ", chi2)
     return chi2
 
-def do_edep_fit(data_vals, set_hist, yscale=0.16, escale=945, resscale=0.01):
-
-
+def do_edep_fit(data_vals, set_hist, weights=[], yscale=0.16, escale=945, resscale=0.01):
     data_dist = data_vals
+    if len(weights) != len(data_dist):
+        weights = [1]*len(data_dist)
+    else:
+        print("Using weights for energy deposted fit data")
+
     # Bin the flux data into a histogram
     data_bin_width = float(set_hist["max"] - set_hist["min"]) / float(set_hist["n_bins"])
     data_bin_centers = np.linspace( (set_hist["min"] + float(data_bin_width)/2), (set_hist["max"] - (float(data_bin_width)/2)), set_hist["n_bins"])
     data_bins = np.linspace(set_hist["min"], set_hist["max"], set_hist["n_bins"]+1)
     data_bin_idx = np.digitize(data_dist, data_bins)
+    # Since we have the bin index for every data point, we can map our weights to the bins
     binned_data = np.zeros(len(data_bins)-1)
     for i, bin_id in enumerate(data_bin_idx):
         # Ignore overflow bin data
         if bin_id == 0 or bin_id == len(data_bins):
             continue
         #binned_data[bin_id-1] += data_dist[i]	# Raw data
-        binned_data[bin_id-1] += 1		# Histogram
+        binned_data[bin_id-1] += weights[i]	# Histogram
  
     my_muons = Muons(400)
-
     popt, pcov = optimize.curve_fit(get_mc_edep_prediction(data_bin_centers, binned_data, my_muons), data_bin_centers, binned_data, p0=[yscale, escale, resscale], bounds=((0.0, 0.0, 0.0),(np.inf, 1e5, 1.0)))
 
     # Apply the fitted values to the function so we can graph it
@@ -393,6 +396,7 @@ class PositionBasedHistograms():
         self.lines = []
         self.graphs = []
         self.energies = defaultdict(list)
+        self.weights = defaultdict(list)
         self.set_hist = {"n_bins": self.nz, "min": self.zlow, "max": self.zhigh}
     def Fill(self, x, y, z, weight=None):
         xbin = self.h2.GetXaxis().FindBin(x) - 1
@@ -402,9 +406,11 @@ class PositionBasedHistograms():
         if weight is  None:
             self.hists[ybin*self.nx + xbin].Fill(z)
             self.energies[ybin*self.nx + xbin].append(z)
+            self.weights[ybin*self.nx + xbin].append(1)
         else:
             self.hists[ybin*self.nx + xbin].Fill(z, weight)
-            print("Cannot apply weights to PositionBasedHistogram energies")
+            self.energies[ybin*self.nx + xbin].append(z)
+            self.weights[ybin*self.nx + xbin].append(weight)
 
     def Draw(self, canvas, fitf=None):
         #canvas.cd()
@@ -413,6 +419,18 @@ class PositionBasedHistograms():
         self.ll2 = ROOT.TLine((1400/1850)**2, 1000, (1400/1850)**2, -1000)
         self.ll3 = ROOT.TLine(0, -1000, (1400/1850)**2, -1000)
         canvas.Divide(self.nx, self.ny, 0.0, 0.0, 0)
+
+        # Get the z axis range 
+        hmax = 0.0
+        hmin = 10.0
+        for ix in range(self.nx):
+            for iy in range(self.ny):
+                tmp_max = self.hists[iy*self.nx+ix].GetMaximum()
+                tmp_min = self.hists[iy*self.nx+ix].GetMinimum()
+                if tmp_max > hmax:
+                    hmax = tmp_max
+                if tmp_min < hmin:
+                    hmin = tmp_min
         # Canvas/pad indices go from left to right, top to bottom.
         # TH2D indicies go from left to right, bottom to top
         for ix in range(self.nx):
@@ -421,6 +439,7 @@ class PositionBasedHistograms():
                 num = canv_iy*self.nx + ix
                 pad = canvas.cd(num+1)
                 h = self.hists[iy*self.nx+ix]
+                h.GetZaxis().SetRangeUser(hmin, hmax)
                 h.SetStats(0)
                 h.SetTitle("")
                 h.SetLineColor(4)
@@ -445,18 +464,18 @@ class PositionBasedHistograms():
         self.edep_fit_errs = defaultdict(list)
         for idx, e in self.energies.items():
             if len(e) > 0:
-                val, val_err, val_graph, val_chi2 = do_edep_fit(e, self.set_hist, escale=1.0)
+                val, val_err, val_graph, val_chi2 = do_edep_fit(e, self.set_hist, weights=self.weights[idx], escale=1.0)
                 self.edep_fit_vals[idx] = val
-                self.edep_fit_errs[idx] = val_err
-                #print(idx)
+                self.edep_fit_errs[idx] = np.sqrt(val_err)
+
             else:
                 self.edep_fit_vals[idx] = None
                 self.edep_fit_errs[idx] = None
-        #print("----")
+
         for ix in range(self.nx):
             for iy in range(self.ny):
                 arr_idx = int(iy*self.nx + ix)
-                print(arr_idx)
+
                 if arr_idx not in self.edep_fit_vals.keys():
                     continue
 
@@ -476,14 +495,52 @@ class PositionBasedHistograms():
         [ll.SetLineColor(2) for ll in [ll1, ll2, ll3]]
         [ll.SetLineWidth(2) for ll in [ll1, ll2, ll3]]
         [self.lines.append(ll) for ll in [ll1, ll2, ll3]]
+
         c1.cd()
         self.scale_h2.SetStats(0)
-        self.scale_h2.Draw("colztextE")
+        xfirst = self.scale_h2.FindFirstBinAbove(0., 1)
+        yfirst = self.scale_h2.FindFirstBinAbove(0., 2)
+        minz = self.scale_h2.GetBinContent(xfirst+1, yfirst+1)
+        self.scale_h2.GetZaxis().SetRangeUser(minz-(minz*.1), self.scale_h2.GetMaximum())
+        self.scale_h2.Draw("COLZ")
         [ll.Draw("same") for ll in [ll1, ll2, ll3]]
+        for ix in range(self.nx):
+            for iy in range(self.ny):
+                xscale = self.scale_h2.GetXaxis().GetBinCenter(ix+1)
+                yscale = self.scale_h2.GetYaxis().GetBinCenter(iy+1)
+                wscale = self.scale_h2.GetYaxis().GetBinWidth(iy+1)
+                vscale = self.scale_h2.GetBinContent(ix+1, iy+1)
+                escale = self.scale_h2.GetBinError(ix+1, iy+1)
+                if vscale == 0.0 and escale == 0.0:
+                    continue
+                lv = ROOT.TLatex()
+                lv.SetTextSize(0.025)
+                lv.DrawLatex(xscale-wscale/5, yscale+wscale/6, "%.4f" % vscale)
+                le = ROOT.TLatex()
+                le.SetTextSize(0.025)
+                le.DrawLatex(xscale-wscale/5, yscale-wscale/6, "#pm%.1e" % escale)
+        c1.Update()
+
         c2.cd()
         self.resolution_h2.SetStats(0)
-        self.resolution_h2.Draw("colztextE")
+        self.resolution_h2.Draw("COLZ")
         [ll.Draw("same") for ll in [ll1, ll2, ll3]]
+        for ix in range(self.nx):
+            for iy in range(self.ny):
+                xres = self.resolution_h2.GetXaxis().GetBinCenter(ix+1)
+                yres = self.resolution_h2.GetYaxis().GetBinCenter(iy+1)
+                wres = self.resolution_h2.GetYaxis().GetBinWidth(iy+1)
+                vres = self.resolution_h2.GetBinContent(ix+1, iy+1)
+                eres = self.resolution_h2.GetBinError(ix+1, iy+1)
+                if vres == 0.0 and eres == 0.0:
+                    continue
+                lv2 = ROOT.TLatex()
+                lv2.SetTextSize(0.025)
+                lv2.DrawLatex(xres-wres/5, yres+wres/6, "%.4f" % vres)
+                le2 = ROOT.TLatex()
+                le2.SetTextSize(0.025)
+                le2.DrawLatex(xres-wres/5, yres-wres/6, "#pm%.1e" % eres)
+        c2.Update()
 
     def SmearFit(self, sigma):
         self.edep_fit_vals_s = defaultdict(list)
@@ -497,7 +554,7 @@ class PositionBasedHistograms():
                 for i, bin_id in enumerate(bin_idx):
                     if bin_id == 0 or bin_id == len(bins):
                         continue
-                    binned_e[bin_id-1] += 1
+                    binned_e[bin_id-1] += self.weights[idx][i]
 
                 smeared_bin_data = apply_smearing(binned_e, bin_centers, sigma, 0)
 
@@ -509,7 +566,7 @@ class PositionBasedHistograms():
 
                 val_s, val_err_s, val_graph_s, val_chi2_s = do_edep_fit(smeared_unbin_data, self.set_hist, escale=1.0)
                 self.edep_fit_vals_s[idx] = val_s
-                self.edep_fit_errs_s[idx] = val_err_s
+                self.edep_fit_errs_s[idx] = np.sqrt(val_err_s)
             else:
                 self.edep_fit_vals_s[idx] = None
                 self.edep_fit_errs_s[idx] = None

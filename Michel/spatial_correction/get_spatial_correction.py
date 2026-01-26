@@ -8,6 +8,7 @@ import sys
 import pandas as pd
 sys.path.insert(0, '/home/littleca/kdar/Michel/flux2mev_correction/')
 import fitting as fit
+from ROOT import gStyle
 
 JSON_FILE = "/home/littleca/kdar/correction_values.json"
 OUTPUT_PATH = "/home/littleca/kdar/Michel/spatial_correction/"
@@ -145,20 +146,38 @@ if __name__ == "__main__":
 
     # Read in MC data
     MC_file = ROOT.TFile(mc_filename, "READ")
-    MC_tree = MC_file["total_tree"]
-    #MC_tree = MC_file["michel_tree"]
-    flux_MC, Edep_MC, x_MC, y_MC, z_MC = zip(*[[evt.f, evt.edep, evt.x, evt.y, evt.z] for evt in MC_tree])
+    MC_tree = MC_file["michel_tree"]
+    flux_MC, Edep_MC, x_MC, y_MC, z_MC, w_MC = zip(*[[evt.f, evt.edep, evt.x, evt.y, evt.z, evt.mu_weight] for evt in MC_tree])
     MC_file.Close()
     print("MC data loaded")
 
     # Calculate energy in MeV from flux
-    # TODO Should I try and do the volume cut here
-    MC_flux_fit_vals, MC_flux_errors, MC_flux_fit_graph, MC_flux_fit_chi2 = fit.do_edep_fit(flux_MC, set_hist)
+    flux_min = 15e3
+    flux_max = 60e3
+
+    inner_flux_MC = []
+    inner_flux_w_MC = []
+    for f,x,y,z,w in zip(flux_MC, x_MC, y_MC, z_MC, w_MC):
+        if np.sqrt(x**2 + y**2) < R_FV and Z_FV_LOW < z < Z_FV_HIGH:
+            inner_flux_MC.append(f)
+            inner_flux_w_MC.append(w)
+    # Get the optimal numbe rof flux bins using the same methos as in get_data_params.y
+    inner_flux_MC_slice = [i for i in inner_flux_MC if i < flux_max and i > flux_min]
+    n_bins_flux = len(np.histogram_bin_edges(inner_flux_MC_slice, bins='rice')) - 1
+    set_MC_hist = {"n_bins": n_bins_flux, "min": flux_min, "max": flux_max}
+
+    plot_MC_flux = ROOT.TH1D("flux_inner_MC", "MC_Flux", n_bins_flux, flux_min, flux_max)
+    for f, w in zip(inner_flux_MC, inner_flux_w_MC):
+        plot_MC_flux.Fill(f,w)
+
+    MC_flux_fit_vals, MC_flux_errors, MC_flux_fit_graph, MC_flux_fit_chi2 = fit.do_edep_fit(inner_flux_MC, set_MC_hist, weights=inner_flux_w_MC)
 
     MC_conv = MC_flux_fit_vals[1]
     MC_conv_err = np.sqrt(MC_flux_errors[1][1])
     MC_res_scale = MC_flux_fit_vals[2]
     MC_res_scale_err = np.sqrt(MC_flux_errors[2][2])
+
+    print("\nMC flux to MeV conversion %0.2f ± %0.2f" % (MC_conv, MC_conv_err))
 
     # Like with the real data, convert MC flux values to MeV using the conv we just found
     E_MC = [ flux/float(MC_conv) for flux in flux_MC ]
@@ -169,16 +188,18 @@ if __name__ == "__main__":
 
     inner_E_MC = []
     inner_pos_MC = []
-    for E,x,y,z in zip(E_MC, x_MC, y_MC, z_MC):
+    inner_w_MC = []
+    for E,x,y,z,w in zip(E_MC, x_MC, y_MC, z_MC, w_MC):
         if np.sqrt(x**2 + y**2) < R_FV and Z_FV_LOW < z < Z_FV_HIGH and E > 20.0:
             inner_E_MC.append(E)
+            inner_w_MC.append(w)
             inner_pos_MC.append((x,y,z))
 
-            location_mc_hist.Fill(x**2+y**2, z, E)
-            E_mc_hist.Fill(E)
+            location_mc_hist.Fill(x**2+y**2, z, E, w)
+            E_mc_hist.Fill(E, w)
 
     # Fit the MC inner energy
-    MC_fit_vals, MC_fit_errors, MC_fit_graph, MC_fit_chi2 = fit.do_edep_fit(inner_E_MC, set_hist, escale=1.0)
+    MC_fit_vals, MC_fit_errors, MC_fit_graph, MC_fit_chi2 = fit.do_edep_fit(inner_E_MC, set_hist, weights=inner_w_MC, escale=1.0)
 
     scale_MC = MC_fit_vals[1]
     scale_MC_err = np.sqrt(MC_fit_errors[1][1])
@@ -201,7 +222,7 @@ if __name__ == "__main__":
     for i, bin_id in enumerate(MC_bin_idx):
         if bin_id == 0 or bin_id == len(MC_bins):
             continue
-        binned_MC[bin_id-1] += 1
+        binned_MC[bin_id-1] += inner_w_MC[i]
 
     smeared_MC = fit.apply_smearing(binned_MC, bin_centers, sigma_smear, 0)
 
@@ -269,6 +290,18 @@ if __name__ == "__main__":
    # Write to outfile
     outFile = ROOT.TFile(output_filename, "RECREATE")
     outFile.cd()
+
+    for period in range(n_periods):
+        c5_4 = ROOT.TCanvas("Period %i Data Fit Scale" % period)
+        c5_5 = ROOT.TCanvas("Period %i Data Fit Resolution" % period)
+        location_data_hist[period].DrawFit(c5_4, c5_5)
+        c5_4.Update()
+        c5_5.Update()
+        c5_4.Draw()
+        c5_5.Draw()
+        c5_4.Write()
+        c5_5.Write()
+
     c5_0 = ROOT.TCanvas("MC Fit Scale")
     c5_1 = ROOT.TCanvas("MC Fit Resolution")
     location_mc_hist.DrawFit(c5_0, c5_1)
@@ -313,13 +346,12 @@ if __name__ == "__main__":
 
                 if mc != 0:
                     corr_avg_s.append(d/mc)
+                # TODO Save the correction values to json file
 
         corr_avg_s = np.array(corr_avg_s)
 
         print("Average scale factor for smeared MC: "+str(np.average(corr_avg_s)))
 
-    # Write to outfile
-    #outFile = ROOT.TFile(output_filename, "RECREATE")
     outFile.cd()
 
     c5_2 = ROOT.TCanvas("Smeared MC Fit Scale")
@@ -332,6 +364,21 @@ if __name__ == "__main__":
     c5_2.Write()
     c5_3.Write()
 
+    # MC flux to MeV
+    c8 = ROOT.TCanvas("MC Flux to MeV")
+    plot_MC_flux.GetXaxis().SetTitle("Flux")
+    plot_MC_flux.GetYaxis().SetTitle("Counts")
+    plot_MC_flux.GetYaxis().SetRangeUser(0, 1.2*plot_MC_flux.GetMaximum())
+    plot_MC_flux.SetStats(0)
+    plot_MC_flux.SetLineColor(ROOT.kBlack)
+    plot_MC_flux.SetLineWidth(2)
+    MC_flux_fit_graph.SetLineColor(2)
+    MC_flux_fit_graph.SetLineWidth(2)
+    MC_flux_fit_graph.Draw("al")
+    plot_MC_flux.Draw("SAMEE")
+    c8.Write()
+  
+
     ntuple_out = ROOT.TNtuple("energy_tree", "energy_tree", "E:x:y:z")
     [ntuple_out.Fill(E,x,y,z) for E, (x, y, z) in zip(smeared_MC, inner_pos_MC)]
     ntuple_out.Write()
@@ -339,12 +386,14 @@ if __name__ == "__main__":
     c6 = []
     for period in range(n_periods):
         c6.append(ROOT.TCanvas("MC Energy Scale Correction wrt Run Period %i" % (period)))
+        corr_h2[period].SetStats(0)
         corr_h2[period].Draw("TEXT COLZ")
         c6[period].Write()
 
     c7 = []
     for period in range(n_periods):
         c7.append(ROOT.TCanvas("Smeared MC Energy Scale Correction wrt Run Period %i" % (period)))
+        corr_h2_s[period].SetStats(0)
         corr_h2_s[period].Draw("TEXT COLZ")
         c7[period].Write()
 
