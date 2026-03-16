@@ -8,9 +8,6 @@
  * update_michel_pair.cc
  * (/home/marzece/KDAR_Analysis/MichelAnalysis/HyoungkuMichel/update_michel_pair.cc)
  *
- * NEED TO UPDATE
- * TODO
- * - Use energy deposited
  */
 #include <iostream>
 #include <sstream>
@@ -95,7 +92,7 @@ int main(int argc, char ** argv){
     track->SetBranchAddress("SatPMTs", &nsat_pmts);
     track->SetBranchAddress("kicker_trigger", &kicker_trigger);
     track->SetBranchAddress("inner_Time", &inner_time);
-
+    track->SetBranchAddress("has_mismatch", &mismatch);
 
     int tTrig = track->GetEntries();
 
@@ -128,6 +125,9 @@ int main(int argc, char ** argv){
         track->GetEntry( iTrig );
 
         if(recoFlux->empty()) {
+            continue;
+        }
+        if(mismatch) {
             continue;
         }
         if((iTrig+1) % 500000 == 0 ) {
