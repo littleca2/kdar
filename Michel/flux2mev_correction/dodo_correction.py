@@ -219,30 +219,31 @@ def DatasetNumberCheck(RUN, SUBRUN):
     elif(tmpRUN >= 219900370 and tmpRUN < 221099999):
          num = 99 #2022: -run 2210
     #2023 sterile:run 2248- (kicker/self: run 2226?-)
-    elif(tmpRUN >= 224800000 and tmpRUN < 225902198):
-         num = 100
-    elif(tmpRUN >= 225902198 and tmpRUN < 225907198):
-         num = 101
-    elif(tmpRUN >= 225907198 and tmpRUN < 226000538):
-         num = 102
-    elif(tmpRUN >= 226000538 and tmpRUN < 227200393):
-         num = 103
-    elif(tmpRUN >= 227200393 and tmpRUN < 227804386):
-         num = 104
-    elif(tmpRUN >= 227804386 and tmpRUN < 228300747):
-         num = 105
-    elif(tmpRUN >= 228300747 and tmpRUN < 228305747):
-        num = 106
-    elif(tmpRUN >= 228305747 and tmpRUN < 228310747):
-        num = 107
-    elif(tmpRUN >= 228310747 and tmpRUN < 229000392):
-        num = 108
-    elif(tmpRUN >= 229000392 and tmpRUN < 229005392):
-        num = 109
-    elif(tmpRUN >= 229005392 and tmpRUN < 229010392):
-        num = 110
-    elif(tmpRUN >= 229010392 and tmpRUN < 229399999):
-        num = 111
+	# This is not up to date
+#    elif(tmpRUN >= 224800000 and tmpRUN < 225902198):
+#         num = 100
+#    elif(tmpRUN >= 225902198 and tmpRUN < 225907198):
+#         num = 101
+#    elif(tmpRUN >= 225907198 and tmpRUN < 226000538):
+#         num = 102
+#    elif(tmpRUN >= 226000538 and tmpRUN < 227200393):
+#         num = 103
+#    elif(tmpRUN >= 227200393 and tmpRUN < 227804386):
+#         num = 104
+#    elif(tmpRUN >= 227804386 and tmpRUN < 228300747):
+#         num = 105
+#    elif(tmpRUN >= 228300747 and tmpRUN < 228305747):
+#        num = 106
+#    elif(tmpRUN >= 228305747 and tmpRUN < 228310747):
+#        num = 107
+#    elif(tmpRUN >= 228310747 and tmpRUN < 229000392):
+#        num = 108
+#    elif(tmpRUN >= 229000392 and tmpRUN < 229005392):
+#        num = 109
+#    elif(tmpRUN >= 229005392 and tmpRUN < 229010392):
+#        num = 110
+#    elif(tmpRUN >= 229010392 and tmpRUN < 229399999):
+#        num = 111
     
     return num
 
