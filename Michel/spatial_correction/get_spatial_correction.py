@@ -215,8 +215,9 @@ if __name__ == "__main__":
     sigma_smear = np.sqrt(res_data_avg**2 - res_MC**2)
 
     # Bin the data
-    bin_centers = (np.linspace(min_E, max_E, n_bin) + (max_E-min_E)/(2*n_bin))[:-1]
+    #bin_centers = (np.linspace(min_E, max_E, n_bin) + (max_E-min_E)/(2*n_bin))[:-1]
     MC_bins = np.linspace(min_E, max_E, n_bin+1)
+    bin_centers = (MC_bins[:-1] + MC_bins[1:])/2
     MC_bin_idx = np.digitize(inner_E_MC, MC_bins)
     binned_MC = np.zeros(len(MC_bins)-1)
     for i, bin_id in enumerate(MC_bin_idx):
@@ -257,6 +258,8 @@ if __name__ == "__main__":
         print("Run Period %i Scale ratio: %0.5f ± %0.5f" % (period, scale_ratio[period], scale_ratio_err[period]))
 
     corr_h2 = []
+    diff_h2 = []
+    h_scale = []
     for period in range(n_periods):
         location_mc_hist.Fit()
         location_data_hist[period].Fit()
@@ -267,8 +270,11 @@ if __name__ == "__main__":
         data_scale = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
         mc_scale = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
         corr = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
+        diff = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
 
         corr_h2.append(ROOT.TH2D("mc_energy_scale_correction", "", 12, 0, 2.56e3, 10, -1.25e3, 1.25e3))
+        diff_h2.append(ROOT.TH2D("data_mc_energy_scale_difference", "", 12, 0, 2.56e3, 10, -1.25e3, 1.25e3))
+        h_scale.append(ROOT.TH1D("scale_distribution_for_period", "", 50, 1.5, 0.5))
         corr_avg = []
 
         for i in range(loc_data_hist_nbinsX):
@@ -277,8 +283,12 @@ if __name__ == "__main__":
                 mc = location_mc_hist.scale_h2.GetBinContent(i+1, j+1)
                 data_scale[i, j] = d
                 mc_scale[i, j] = mc
+                diff[i, j] = d-mc
+                diff_h2[period].SetBinContent(i+1, j+1, diff[i, j])
                 corr[i, j] = d/mc if mc !=0 else 1.0
                 corr_h2[period].SetBinContent(i+1, j+1, corr[i, j])
+                if d > 0.5 :
+                    h_scale[period].Fill(d)
 
                 if mc != 0:
                     corr_avg.append(d/mc)
@@ -286,6 +296,63 @@ if __name__ == "__main__":
         corr_avg = np.array(corr_avg)
 
         print("Average scale factor: "+str(np.average(corr_avg)))
+
+    # Compare the scales from each year to 2021
+    corr_21_22 = corr_h2[1].Clone()
+    corr_21_22.Divide(corr_h2[0])
+
+    corr_21_23 = corr_h2[2].Clone()
+    corr_21_23.Divide(corr_h2[0])
+
+    # Apply the spatial correction to the MC data
+    pixel_edges_r = np.linspace(0, 2.56e6, 13)
+    pixel_edges_z = np.linspace(-1.25e3, 1.25e3, 11)
+
+    rz_inner_pos_MC = [np.array([(x**2 + y**2), z]) for x,y,z in inner_pos_MC]
+    rz_inner_pos_MC = np.array(rz_inner_pos_MC)
+
+    x_bin_idx = np.digitize(rz_inner_pos_MC[:,0], pixel_edges_r)
+    y_bin_idx = np.digitize(rz_inner_pos_MC[:,1], pixel_edges_z)
+
+    location_mc_corr_hist = []
+
+    for period in range(n_periods):
+        location_mc_corr_hist.append(fit.PositionBasedHistograms("MC", "", 12, 0, 2.56e6, 10, -1.25e3, 1.25e3, n_bin, min_E, max_E))
+        for i, E in enumerate(inner_E_MC):
+            corr_bin = corr_h2[period].GetBin(int(x_bin_idx[i]), int(y_bin_idx[i]))
+            corr_val = corr_h2[period].GetBinContent(corr_bin)
+            E_corr = E*(1/corr_val)
+            x, y, z = inner_pos_MC[i]
+            w = inner_w_MC[i]
+
+            location_mc_corr_hist[period].Fill((x**2 + y**2), z, E_corr, w)
+
+    # Get the corrected MC plots
+    diff_corr_scale_h2 = []
+    diff_corr_res_h2 = []
+    for period in range(n_periods):
+        location_mc_corr_hist[period].Fit()
+
+        loc_data_hist_nbinsX = location_data_hist[period].scale_h2.GetNbinsX()
+        loc_data_hist_nbinsY = location_data_hist[period].scale_h2.GetNbinsY()
+
+        diff_scale = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
+        diff_res = np.zeros((loc_data_hist_nbinsX, loc_data_hist_nbinsY))
+
+        diff_corr_scale_h2.append(ROOT.TH2D("corrected_data_mc_energy_scale_difference", "", 12, 0, 2.56e3, 10, -1.25e3, 1.25e3))
+        diff_corr_res_h2.append(ROOT.TH2D("corrected_data_mc_energy_resolution_difference", "", 12, 0, 2.56e3, 10, -1.25e3, 1.25e3))
+
+        for i in range(loc_data_hist_nbinsX):
+            for j in range(loc_data_hist_nbinsY):
+                d_scale = location_data_hist[period].scale_h2.GetBinContent(i+1, j+1)
+                mc_scale = location_mc_corr_hist[period].scale_h2.GetBinContent(i+1, j+1)
+                diff_scale[i, j] = d_scale-mc_scale
+                diff_corr_scale_h2[period].SetBinContent(i+1, j+1, diff_scale[i, j])
+
+                d_res = location_data_hist[period].resolution_h2.GetBinContent(i+1, j+1)
+                mc_res = location_mc_corr_hist[period].resolution_h2.GetBinContent(i+1, j+1)
+                diff_res[i, j] = d_res-mc_res
+                diff_corr_res_h2[period].SetBinContent(i+1, j+1, diff_res[i, j])
 
    # Write to outfile
     outFile = ROOT.TFile(output_filename, "RECREATE")
@@ -311,6 +378,17 @@ if __name__ == "__main__":
     c5_1.Draw()
     c5_0.Write()
     c5_1.Write()
+
+    for period in range(n_periods):
+        c5_6 = ROOT.TCanvas("Period %i Corrected MC Fit Scale" % period)
+        c5_7 = ROOT.TCanvas("Period %i Corrected MC Fit Resolution" % period)
+        location_mc_corr_hist[period].DrawFit(c5_6, c5_7)
+        c5_6.Update()
+        c5_7.Update()
+        c5_6.Draw()
+        c5_7.Draw()
+        c5_6.Write()
+        c5_7.Write()
 
     # Compare data and smeared MC energy scales
     scale_ratio_s = []
@@ -390,12 +468,51 @@ if __name__ == "__main__":
         corr_h2[period].Draw("TEXT COLZ")
         c6[period].Write()
 
-    c7 = []
+    c6_1 = []
     for period in range(n_periods):
-        c7.append(ROOT.TCanvas("Smeared MC Energy Scale Correction wrt Run Period %i" % (period)))
+        c6_1.append(ROOT.TCanvas("Data - MC Energy Scale Difference wrt Run Period %i" % (period)))
+        diff_h2[period].SetStats(0)
+        diff_h2[period].Draw("TEXT COLZ")
+        c6_1[period].Write()
+
+    c6_2 = []
+    for period in range(n_periods):
+        c6_2.append(ROOT.TCanvas("Smeared MC Energy Scale Correction wrt Run Period %i" % (period)))
         corr_h2_s[period].SetStats(0)
         corr_h2_s[period].Draw("TEXT COLZ")
+        c6_2[period].Write()
+
+    c7 = []
+    for period in range(n_periods):
+        c7.append(ROOT.TCanvas("Data - Corrected MC Energy Resolution Difference wrt Run Period %i" % (period)))
+        diff_corr_res_h2[period].SetStats(0)
+        diff_corr_res_h2[period].Draw("TEXT COLZ")
         c7[period].Write()
+
+    c7_1 = []
+    for period in range(n_periods):
+        c7_1.append(ROOT.TCanvas("Data - Corrected MC Energy Scale Difference wrt Run Period %i" % (period)))
+        diff_corr_scale_h2[period].SetStats(0)
+        diff_corr_scale_h2[period].Draw("TEXT COLZ")
+        c7_1[period].Write()
+
+    c6_3 = ROOT.TCanvas("2022/2021 Energy Scale Comparison")
+    corr_21_22.SetStats(0)
+    corr_21_22.Draw("TEXT COLZ")
+    c6_3.Write()
+
+    c6_4 = ROOT.TCanvas("2023/2021 Energy Scale Comparison")
+    corr_21_23.SetStats(0)
+    corr_21_23.Draw("TEXT COLZ")
+    c6_4.Write()
+
+    c6_5 = []
+    for period in range(n_periods):
+        c6_5.append(ROOT.TCanvas("1D Energy Scale Hist Period %i" % (period)))
+        h_scale[period].SetStats(0)
+        h_scale[period].Draw("TEXT COLZ")
+        c6_5[period].Write()
+
 
     c0 = ROOT.TCanvas("Inner Michel Reco E: MC Data")
     E_mc_hist.SetTitle("MC")
@@ -444,13 +561,13 @@ if __name__ == "__main__":
     E_mc_hist_s.SetLineColor(ROOT.kBlue)
     E_mc_hist_s.SetLineWidth(2)
     E_mc_hist_s.Draw("HISTE")
-#    E_mc_g_s.SetTitle("Smeared MC")
-#    E_mc_g_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
-#    E_mc_g_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
-#    E_mc_g_s.SetStats(0)
-#    E_mc_g_s.SetLineColor(ROOT.kBlue)
-#    E_mc_g_s.SetLineWidth(2)
-#    E_mc_g_s.Draw("AP")
+    E_mc_g_s.SetTitle("Smeared MC")
+    E_mc_g_s.GetXaxis().SetTitle("Reconstructed Energy [MeV]")
+    E_mc_g_s.GetYaxis().SetTitle("Events/%0.2f MeV" % (bwidth))
+    E_mc_g_s.SetStats(0)
+    E_mc_g_s.SetLineColor(ROOT.kBlue)
+    E_mc_g_s.SetLineWidth(2)
+    E_mc_g_s.Draw("AP")
     MC_fit_graph_s.SetLineColor(2)
     MC_fit_graph_s.SetLineWidth(2)
     MC_fit_graph_s.Draw("Same")
