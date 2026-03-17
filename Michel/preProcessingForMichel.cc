@@ -65,6 +65,7 @@ int main(int argc, char ** argv){
     int subRunNum = 0;
     int kicker_trigger = 0;
     double event_time = 0;
+    unsigned int mismatch = 0;
 
     unsigned int TTT;
     double time_since_kicker = -1;
