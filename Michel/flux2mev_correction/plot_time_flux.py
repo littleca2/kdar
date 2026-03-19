@@ -323,6 +323,8 @@ if __name__ == "__main__":
     # ===== Current Version Data =====
     vals_per_period, nominal_flux2mev_dict = get_json_correction(versionID, run_times)
 
+    # TODO: This makes it difficult to only analyze part of the data
+    # needs to be re-worked so that you dont need all 3 periods
     period_first_run_list = [FIRST_RUN, 2094, 2248]
     first_flux2mev = []
     period1_idx = np.where(vals_per_period[0][:,0] == FIRST_RUN)[0]
