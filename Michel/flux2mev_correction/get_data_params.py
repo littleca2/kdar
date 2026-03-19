@@ -244,7 +244,7 @@ if __name__ == "__main__":
     # Grab the Data to analyze
     print("Opening %s" % (inputName))
     data_file = ROOT.TFile.Open(inputName, "READ")
-    energy_tree = data_file["event_tree"]
+    energy_tree = data_file.event_tree
     n_entries = energy_tree.GetEntries()
     data = np.zeros(n_entries, dtype=[("x", float), ("y", float), ("z", float),
                                       ("flux", float), ("nsat", int), ("delt", float), ("delvtx", float),
