@@ -8,6 +8,7 @@
 	0: all the data in michel_pair_combined.root
 	1: Each run
 	2: Each subrun (not implemented)
+    3: Each day
 """
 
 import ROOT
@@ -24,8 +25,8 @@ import time
 from collections import defaultdict
 import json
 
-OUTPUT_PATH = "/home/littleca/kdar/Michel/flux2mev_correction/output_fluxCorr/"
-JSON_NAME="/home/littleca/kdar/correction_values.json"
+OUTPUT_PATH = "/home/mlf/littleca/kdar/Michel/flux2mev_correction/output_fluxCorr/"
+JSON_NAME="/home/mlf/littleca/kdar/correction_values.json"
 
 MICHEL_ENDPOINT_ENERGY = 53.3 # MeV
 # Fiducial volume and energy ROI selection values
@@ -54,8 +55,13 @@ def fit_delta_t(h):
     return delta_t_fitf.Clone()
 
 def get_run_dates():
-    vals = list(csv.reader(open("/home/littleca/kdar/Michel/flux2mev_correction/run_dates.txt")))
+    vals = list(csv.reader(open("/home/mlf/littleca/kdar/Michel/flux2mev_correction/run_dates.txt")))
     run_times = defaultdict(lambda : (None, None))
+    try:
+        for i, (run, sdate, stime, edate, etime) in enumerate(vals):
+            continue
+    except:
+        print(vals[i])
     for i, (run, start_date, start_time, end_date, end_time) in enumerate(vals):
         run = int(run)
         if start_date:
@@ -80,7 +86,7 @@ def get_run_dates():
     return run_times
 
 def get_hyoungkus_correction(run):
-    path = "/home/littleca/kdar/Michel/flux2mev_correction/HyoungKu_correction/"
+    path = "/home/mlf/littleca/kdar/Michel/flux2mev_correction/HyoungKu_correction/"
     fn = "Run_%i_timeCorr.dat" % run
     if os.path.isfile(os.path.join(path, fn)) :
         fin = open(os.path.join(path, fn))
@@ -168,12 +174,33 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=str, help="input ROOT filename (update_michel_pair.cc output; michel_pair_{run#}.root if run type = 1 or michel_pair_combined.root if run type = 0)")
-    parser.add_argument("runType", type=int, help="0: Sum, 1: Run, 2: Subrun")
+    parser.add_argument("runType", type=int, help="0: Sum, 1: Run, 2: Subrun, 3: By date")
     parser.add_argument("version", type=str, help="Name to be used as version ID")
+    parser.add_argument("--r", type=str, help="If runType=3, any additional run numbers that happen on the same date as the input file, seperated by a comma")
     args = parser.parse_args()
     inputName = args.input
     RUN_TYPE = args.runType
     versionID = args.version
+    addRuns = args.r
+
+    if addRuns:
+        inputName_list = [inputName]
+        inputRun = os.path.basename(inputName)[12:16]
+        run_list = [inputRun]
+
+        runDir = os.path.dirname(inputName)
+        add_run_list = addRuns.split(',')
+        for run_str in add_run_list:
+            runPath = os.path.join(runDir, "michel_pair_"+run_str+".root")
+            inputName_list.append(runPath)
+            run_list.append(run_str)
+
+        for i, name in enumerate(inputName_list):
+            if not os.path.isfile(name):
+                print(f"Cannot find file: {name}")
+                inputName_list.remove(name)
+                run_list.pop(i)
+        print("Runs to be fit: ", run_list)
 
     fid_max = 70
     fid_min = 0
@@ -196,7 +223,7 @@ if __name__ == "__main__":
     
     #FLUX2MEV = 2*392.1 # MDAQ ONLY
     FLUX2MEV = 960 #956.0776 # From earlier michel calibration
-    if (RUN_TYPE==1):
+    if (RUN_TYPE==1 or RUN_TYPE==3):
         # Get the Flux2MeV from the json file
         with open(JSON_NAME, "r") as f:
            data_vals = json.load(f)
@@ -208,13 +235,13 @@ if __name__ == "__main__":
         if versionID in data_vals.keys():
             # Get the name of the "sum"key for this version
             # There should be only be one value for sum
-            sumlist = [key for key, value in data_vals[versionID].items() if 'sum' in key]
+            sumlist = [ idx for idx, obj in enumerate(data_vals[versionID]) if 'sum' in obj.keys()]
             if len(sumlist) > 1 :
                 print("ERROR: Multiple sum entries (%i) present for version %s" %(len(sumlist),  versionID))
                 exit()
 
         if len(sumlist) == 1 :
-            FLUX2MEV = data_vals[versionID][sumlist[0]]["Flux2MeV"]
+            FLUX2MEV = data_vals[versionID][sumlist[0]]["sum"]["Flux2MeV"]
 
         else :
             while True :
@@ -242,9 +269,17 @@ if __name__ == "__main__":
 
 
     # Grab the Data to analyze
-    print("Opening %s" % (inputName))
-    data_file = ROOT.TFile.Open(inputName, "READ")
-    energy_tree = data_file.event_tree
+    energy_tree = ROOT.TChain("event_tree")
+    if RUN_TYPE == 3:
+        for inFile in inputName_list:
+            print("Opening %s" % (inFile))
+            energy_tree.Add(inFile)
+    else:
+        print("Opening %s" % (inputName))
+        energy_tree.Add(inputName)
+        #data_file = ROOT.TFile.Open(inputName, "READ")
+    
+    #energy_tree = data_file.event_tree
     n_entries = energy_tree.GetEntries()
     data = np.zeros(n_entries, dtype=[("x", float), ("y", float), ("z", float),
                                       ("flux", float), ("nsat", int), ("delt", float), ("delvtx", float),
@@ -300,7 +335,7 @@ if __name__ == "__main__":
     res_scale = flux_fit_vals[2]
     res_scale_err = np.sqrt(flux_errors[2][2])
 
-    print("File = %s, Conversion = %f +- %f" % (inputName, conv, conv_err))
+    print("File = %s, Conversion = %f +- %f" % (inputName_list, conv, conv_err))
     flux_fit_graph.SetLineColor(2)
     flux_fit_graph.SetLineWidth(2)
 
@@ -362,22 +397,38 @@ if __name__ == "__main__":
         output_run_name = output_type+"_"+str(output_run)
         output_subrun = None
         outFile = ROOT.TFile(OUTPUT_PATH+str(versionID)+"/fluxCorr_"+str(output_run)+".root", "RECREATE")
-    elif (RUN_TYPE==3) :
+    elif (RUN_TYPE==2) :
         # Looking on per-subrun basis
         output_type = "subrun"
         output_run = int(data[0]['run'])
         output_run_name = output_type+"_"+str(output_run)
         output_subrun = int(dat[0]['subrun'])
         outFile = ROOT.TFile(OUTPUT_PATH+str(versionID)+"/fluxCorr_"+str(output_run)+"_"+str(output_subrun)+".root", "RECREATE")
+    elif (RUN_TYPE==3) :
+        # Looking at per-day basis
+        output_type = "run"
+        output_run_name = ""
+        output_run = []
+        for run_str in run_list:
+            output_run_name = output_run_name+run_str
+            output_run.append(int(run_str))
+        output_run_name = output_type+"_"+output_run_name
+        output_subrun = None
+        outFile = ROOT.TFile(OUTPUT_PATH+str(versionID)+"/fluxCorr_"+output_run_name+".root", "RECREATE")
+
     
     out_vals = {output_run_name : {"Run" : output_run, "Subrun" : output_subrun, "StartingFlux2MeV": FLUX2MEV, "Flux2MeV" : conv, "Flux2MeVErr" : conv_err, "Flux2MeVScale" : None, "Flux2MeVScaleErr" : None}}
-    version_update = {str(versionID) : out_vals}
+    version_update = {str(versionID) : [out_vals]}
 
     if (os.path.isfile(JSON_NAME)) :
         with open(os.path.abspath(JSON_NAME), "r") as jfile:
             json_data = json.load(jfile)
         if (str(versionID) in json_data) :
-            json_data[str(versionID)].update(out_vals)
+            keyidx = [ idx for idx, obj in enumerate(json_data[str(versionID)]) if str(output_run_name) in obj.keys()]
+            if len(keyidx) > 0:
+                json_data[str(versionID)][keyidx[0]] = out_vals
+            else:
+                json_data[str(versionID)].append(out_vals)
         else :
             json_data.update(version_update)
 

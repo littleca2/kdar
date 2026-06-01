@@ -1,7 +1,7 @@
 #!/bin/bash
 
-INDIR="/home/littleca/kdar/cleanerKDAR/Michel/output_preProcessingForMichel"
-OUTDIR="/home/littleca/kdar/cleanerKDAR/Michel/output_updateMichelPair"
+INDIR="/home/mlf/littleca/kdar/Michel/output_preProcessingForMichel"
+OUTDIR="/home/mlf/littleca/kdar/Michel/output_updateMichelPair"
 
 for file in `ls $INDIR`
 do

@@ -341,7 +341,7 @@ int main(int argc, char ** argv){
     int cosmu_countTVBV = 0;
 
     for(size_t iTrig = 0; iTrig < V_TrigID.size(); iTrig++) {
-        if ( (iTrig+1) % 20000 == 0 ) {
+        if ( (iTrig+1) % 100000 == 0 ) {
             cout << (iTrig+1) << " done. " << endl;
         }
 

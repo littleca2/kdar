@@ -6,12 +6,12 @@ from scipy.optimize import curve_fit
 import json
 import sys
 import pandas as pd
-sys.path.insert(0, '/home/littleca/kdar/Michel/flux2mev_correction/')
+sys.path.insert(0, '/home/mlf/littleca/kdar/Michel/flux2mev_correction/')
 import fitting as fit
 from ROOT import gStyle
 
-JSON_FILE = "/home/littleca/kdar/correction_values.json"
-OUTPUT_PATH = "/home/littleca/kdar/Michel/spatial_correction/"
+JSON_FILE = "/home/mlf/littleca/kdar/correction_values.json"
+OUTPUT_PATH = "/home/mlf/littleca/kdar/Michel/spatial_correction/"
 
 def delta_sigma(E, R_data, R_MC):
     E_ep = fit.MICHEL_E_ENDPOINT	# MeV
@@ -42,6 +42,7 @@ if __name__ == "__main__":
     ROOT.TH1.AddDirectory(0)
 
     data_file = ROOT.TFile(data_filename, "READ")
+    event_tree_in = data_file.event_tree
     bin_r = 12
     bin_z = 10
 
@@ -66,20 +67,25 @@ if __name__ == "__main__":
 
     data_json_vals = data_vals[versionID]
     df_json = pd.DataFrame(data_json_vals)
-    n_periods = int(df_json.max(axis=1)["RunPeriod"]+1)
-
-    print("Found %i run periods" % (n_periods))
+    #n_periods = int(df_json.max(axis=1)["RunPeriod"]+1)
+    n_periods = 4
+    #print("Found %i run periods" % (n_periods))
 
     # We read in the run data for runs that are in the JSON file
     data = []
     prev_run = 0
     no_period = 0
-    for evt in data_file["event_tree"]:
+    for evt in event_tree_in:
         if evt.run != prev_run:
             prev_run = evt.run
 
             try:
-                period = data_json_vals["run_"+str(int(evt.run))]["RunPeriod"]
+                run_name = str("run_"+str(int(evt.run)))
+                keyidx = [idx for idx, obj in enumerate(data_json_vals) if run_name in obj.keys()]
+                if len(keyidx) != 1:
+                    print(f"Found {len(keyidx)} objects with key name {run_name}. Skipping run.")
+                    continue
+                period = data_json_vals[keyidx[0]][run_name]["RunPeriod"]
                 no_period = 0
             except KeyError:
                 no_period = 1
@@ -95,7 +101,7 @@ if __name__ == "__main__":
 
     data[:, :3] *= 1e3	# Convert data coordinates to millimeters
 
-    for i, value_dict in enumerate(data_json_vals.values()):
+    for i, value_dict in enumerate(data_json_vals):
         np.divide(data[:, 4], value_dict["Flux2MeV"], out=data[:,5], where=data[:,6]==value_dict["Run"])
     # List to hold event energies for each run period
     inner_E_data = [[] for i in range(n_periods)]
